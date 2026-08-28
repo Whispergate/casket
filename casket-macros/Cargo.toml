@@ -1,0 +1,19 @@
+[package]
+name = "casket-macros"
+version = "0.1.0"
+edition = "2021"
+authors = ["SawyersPresent (https://github.com/SawyersPresent)"]
+description = "Proc-macro companion for the casket ICS/OT protocol library"
+repository = "https://github.com/Whispergate/casket"
+keywords = ["ics", "scada", "macros", "derive", "plc"]
+categories = ["network-programming", "development-tools::procedural-macro-helpers"]
+license-file = "../LICENSE"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+darling = "0.20"
