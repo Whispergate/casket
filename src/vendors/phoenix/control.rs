@@ -153,12 +153,12 @@ pub fn get_device_info(target_ip: &str, port: u16, silent: bool) -> Result<Phoen
     let _ = stream.shutdown(std::net::Shutdown::Both);
 
     if !silent {
-        println!("PLC Type: {plc_type}");
+        crate::casket_outln!("PLC Type: {plc_type}");
         if let Some(fw) = &firmware {
-            println!("Firmware: {fw}");
+            crate::casket_outln!("Firmware: {fw}");
         }
         if let Some(b) = &build {
-            println!("Build:    {b}");
+            crate::casket_outln!("Build:    {b}");
         }
     }
 
@@ -183,7 +183,7 @@ pub fn control_ilc150(target_ip: &str, port: u16, action: &str, start_type: &str
     }
 
     if action == "stop" {
-        println!("Sending STOP command...");
+        crate::casket_outln!("Sending STOP command...");
         let _ = send_recv(&mut stream, STOP_CMD);
     } else {
         let cmd = match start_type {
@@ -191,7 +191,7 @@ pub fn control_ilc150(target_ip: &str, port: u16, action: &str, start_type: &str
             "hot" => HOT_START_CMD,
             _ => COLD_START_CMD,
         };
-        println!("Sending {} START command...", start_type.to_uppercase());
+        crate::casket_outln!("Sending {} START command...", start_type.to_uppercase());
         let _ = send_recv(&mut stream, cmd);
     }
 
@@ -213,7 +213,7 @@ pub fn control_ilc150(target_ip: &str, port: u16, action: &str, start_type: &str
         "Unknown"
     };
 
-    println!("PLC state: {state}");
+    crate::casket_outln!("PLC state: {state}");
     Ok(state.to_string())
 }
 
@@ -235,17 +235,17 @@ pub fn control_ilc390(target_ip: &str, port: u16, action: &str) -> Result<String
     }
 
     if action == "stop" {
-        println!("Sending STOP via ILC390 protocol...");
+        crate::casket_outln!("Sending STOP via ILC390 protocol...");
         let _ = send_recv(&mut stream, "cc010001400e00004c07");
     } else {
-        println!("Sending START via ILC390 protocol...");
+        crate::casket_outln!("Sending START via ILC390 protocol...");
         let _ = send_recv(&mut stream, "cc010004400e0000182 1");
     }
 
     let _ = stream.shutdown(std::net::Shutdown::Both);
 
     let new_state = if action == "stop" { "Stopped" } else { "Running" };
-    println!("PLC state: {new_state}");
+    crate::casket_outln!("PLC state: {new_state}");
     Ok(new_state.to_string())
 }
 

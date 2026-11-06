@@ -30,11 +30,11 @@ pub fn get_session_cookie(target_ip: &str, port: u16) -> Option<SchneiderSession
 
     let body = match agent.get(&url).call() {
         Ok(r) => if let Ok(s) = r.into_string() { s } else {
-            println!("Error reading FwLog response.");
+            crate::casket_outln!("Error reading FwLog response.");
             return None;
         },
         Err(e) => {
-            println!("Error fetching FwLog: {e}");
+            crate::casket_outln!("Error fetching FwLog: {e}");
             return None;
         }
     };
@@ -93,7 +93,7 @@ pub fn get_device_info(
                 let data = match resp.into_string() {
                     Ok(s) => s,
                     Err(e) => {
-                        println!("Error reading response for user '{user}': {e}");
+                        crate::casket_outln!("Error reading response for user '{user}': {e}");
                         continue;
                     }
                 };
@@ -124,15 +124,15 @@ pub fn get_device_info(
                     state,
                 };
 
-                println!("SUCCESS ({user})");
-                println!("  Device:     {}", info.device);
-                println!("  MAC:        {}", info.mac);
-                println!("  Firmware:   {}", info.firmware);
-                println!("  Controller: {}", info.state);
+                crate::casket_outln!("SUCCESS ({user})");
+                crate::casket_outln!("  Device:     {}", info.device);
+                crate::casket_outln!("  MAC:        {}", info.mac);
+                crate::casket_outln!("  Firmware:   {}", info.firmware);
+                crate::casket_outln!("  Controller: {}", info.state);
                 return Some(info);
             }
             Err(_) => {
-                println!("Auth failed for user '{user}'");
+                crate::casket_outln!("Auth failed for user '{user}'");
             }
         }
     }
@@ -148,13 +148,13 @@ pub fn control_plc(
     action: &str,
 ) -> bool {
     if target_ip.parse::<std::net::Ipv4Addr>().is_err() {
-        println!("Invalid target IP: {target_ip}");
+        crate::casket_outln!("Invalid target IP: {target_ip}");
         return false;
     }
     let safe_action = match action {
         "start" | "stop" => action,
         other => {
-            println!("Unsupported action '{other}'. Use 'start' or 'stop'.");
+            crate::casket_outln!("Unsupported action '{other}'. Use 'start' or 'stop'.");
             return false;
         }
     };
@@ -168,11 +168,11 @@ pub fn control_plc(
 
     match agent.post(&url).set("Cookie", &cookie).call() {
         Ok(_) => {
-            println!("Controller {action} command sent.");
+            crate::casket_outln!("Controller {action} command sent.");
             true
         }
         Err(e) => {
-            println!("Failed to {action} controller: {e}");
+            crate::casket_outln!("Failed to {action} controller: {e}");
             false
         }
     }

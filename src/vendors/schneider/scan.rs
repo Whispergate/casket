@@ -114,7 +114,7 @@ pub fn scan(
     let pkt = build_discovery_packet(&interface.ip, &interface.netmask);
 
     if !silent {
-        println!("Sending discovery packets, waiting {timeout}s for answers...");
+        crate::casket_outln!("Sending discovery packets, waiting {timeout}s for answers...");
     }
     sock.send_to(&pkt, format!("{broadcast}:{DEST_PORT}"))?;
 
@@ -131,8 +131,8 @@ pub fn scan(
                 let dev = parse_response(&buf[..n], &src);
                 if !silent {
                     match (&dev.name, &dev.firmware) {
-                        (Some(name), Some(fw)) => println!("  {}: {name} (firmware {fw})", dev.ip),
-                        _ => println!("  {}: (short response)", dev.ip),
+                        (Some(name), Some(fw)) => crate::casket_outln!("  {}: {name} (firmware {fw})", dev.ip),
+                        _ => crate::casket_outln!("  {}: (short response)", dev.ip),
                     }
                 }
                 devices.push(dev);
@@ -149,9 +149,9 @@ pub fn scan(
 
     if !silent {
         if devices.is_empty() {
-            println!("No Schneider devices found.");
+            crate::casket_outln!("No Schneider devices found.");
         } else {
-            println!("Found {} device(s).", devices.len());
+            crate::casket_outln!("Found {} device(s).", devices.len());
         }
     }
     Ok(devices)
@@ -207,8 +207,8 @@ fn scan_ip_udp(ip: &str, timeout: u64, silent: bool) -> Result<Vec<SchneiderDevi
         if dev.name.is_some() || dev.firmware.is_some() {
             if !silent {
                 match (&dev.name, &dev.firmware) {
-                    (Some(name), Some(fw)) => println!("  {}: {name} (firmware {fw})", dev.ip),
-                    _ => println!("  {}: (short response)", dev.ip),
+                    (Some(name), Some(fw)) => crate::casket_outln!("  {}: {name} (firmware {fw})", dev.ip),
+                    _ => crate::casket_outln!("  {}: (short response)", dev.ip),
                 }
             }
             return Ok(vec![dev]);
@@ -216,14 +216,14 @@ fn scan_ip_udp(ip: &str, timeout: u64, silent: bool) -> Result<Vec<SchneiderDevi
 
         if !silent {
             match (&dev.name, &dev.firmware) {
-                (Some(name), Some(fw)) => println!("  {}: {name} (firmware {fw})", dev.ip),
-                _ => println!("  {}: (short response)", dev.ip),
+                (Some(name), Some(fw)) => crate::casket_outln!("  {}: {name} (firmware {fw})", dev.ip),
+                _ => crate::casket_outln!("  {}: (short response)", dev.ip),
             }
         }
         Ok(vec![dev])
     } else {
         if !silent {
-            println!("No Schneider UDP discovery response from {ip}");
+            crate::casket_outln!("No Schneider UDP discovery response from {ip}");
         }
         Ok(vec![])
     }
@@ -238,8 +238,8 @@ fn scan_ip_both(ip: &str, timeout: u64, silent: bool, port: u16) -> Result<Vec<S
         if !silent {
             for dev in &udp_devs {
                 match (&dev.name, &dev.firmware) {
-                    (Some(name), Some(fw)) => println!("  {}: {name} (firmware {fw})", dev.ip),
-                    _ => println!("  {}: (short response)", dev.ip),
+                    (Some(name), Some(fw)) => crate::casket_outln!("  {}: {name} (firmware {fw})", dev.ip),
+                    _ => crate::casket_outln!("  {}: (short response)", dev.ip),
                 }
             }
         }
@@ -247,7 +247,7 @@ fn scan_ip_both(ip: &str, timeout: u64, silent: bool, port: u16) -> Result<Vec<S
     }
 
     if !silent {
-        println!(
+        crate::casket_outln!(
             "No Schneider UDP discovery response from {ip}; trying TCP {}...",
             effective_modbus_port(port)
         );
@@ -262,8 +262,8 @@ fn scan_ip_both(ip: &str, timeout: u64, silent: bool, port: u16) -> Result<Vec<S
         if !silent {
             for dev in &udp_devs {
                 match (&dev.name, &dev.firmware) {
-                    (Some(name), Some(fw)) => println!("  {}: {name} (firmware {fw})", dev.ip),
-                    _ => println!("  {}: (short response)", dev.ip),
+                    (Some(name), Some(fw)) => crate::casket_outln!("  {}: {name} (firmware {fw})", dev.ip),
+                    _ => crate::casket_outln!("  {}: (short response)", dev.ip),
                 }
             }
         }
@@ -283,10 +283,10 @@ fn tcp_fallback_scan(ip: &str, timeout: u64, silent: bool, port: u16) -> Vec<Sch
         if !silent {
             match (&dev.name, &dev.firmware) {
                 (Some(name), Some(fw)) => {
-                    println!("  {}: {name} (Modbus TCP {port}, firmware {fw})", dev.ip);
+                    crate::casket_outln!("  {}: {name} (Modbus TCP {port}, firmware {fw})", dev.ip);
                 }
-                (Some(name), None) => println!("  {}: {name} (Modbus TCP {port})", dev.ip),
-                _ => println!("  {}: Schneider-compatible Modbus TCP {port}", dev.ip),
+                (Some(name), None) => crate::casket_outln!("  {}: {name} (Modbus TCP {port})", dev.ip),
+                _ => crate::casket_outln!("  {}: Schneider-compatible Modbus TCP {port}", dev.ip),
             }
         }
         return vec![dev];
@@ -304,7 +304,7 @@ fn tcp_fallback_scan(ip: &str, timeout: u64, silent: bool, port: u16) -> Vec<Sch
             identity_match: false,
         };
         if !silent {
-            println!(
+            crate::casket_outln!(
                 "  {}: Schneider-compatible Modbus TCP {port} (UDP discovery did not answer)",
                 dev.ip
             );

@@ -44,10 +44,10 @@ fn set_state_to(interface: &NetworkInterface, target_ip: &str, action: &str) -> 
         _ => bail!("Invalid action '{action}'. Use: run, stop, pause"),
     };
 
-    println!("Initializing connection...");
+    crate::casket_outln!("Initializing connection...");
     init_connection(interface, target_ip)?;
 
-    println!("Sending {} command...", action.to_uppercase());
+    crate::casket_outln!("Sending {} command...", action.to_uppercase());
     let sock = create_socket(interface)?;
 
     let pkt = hex_decode(cmd);
@@ -57,14 +57,14 @@ fn set_state_to(interface: &NetworkInterface, target_ip: &str, action: &str) -> 
     if let Ok((n, _)) = sock.recv_from(&mut buf) {
         let hex = hex_encode(&buf[..n]);
         if hex.len() >= 8 && &hex[hex.len() - 8..] == "09000000" {
-            println!("Command acknowledged by PLC.");
+            crate::casket_outln!("Command acknowledged by PLC.");
             Ok(true)
         } else {
-            println!("Unexpected response from PLC.");
+            crate::casket_outln!("Unexpected response from PLC.");
             Ok(false)
         }
     } else {
-        println!("No response from PLC.");
+        crate::casket_outln!("No response from PLC.");
         Ok(false)
     }
 }

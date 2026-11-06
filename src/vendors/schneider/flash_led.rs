@@ -27,7 +27,7 @@ pub fn flash_led_ip(target_ip: &str) -> Result<()> {
 
     let pkt = hex_decode("0054004b4954414b0000000000000000");
     sock.send_to(&pkt, format!("{target_ip}:{FLASH_PORT}"))?;
-    println!("Flash LED command sent to {target_ip}.");
+    crate::casket_outln!("Flash LED command sent to {target_ip}.");
     Ok(())
 }
 

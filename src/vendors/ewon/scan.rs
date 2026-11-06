@@ -175,7 +175,7 @@ pub fn scan_with_port(
     let sock = UdpSocket::from(s);
 
     if !silent {
-        println!("Sending discovery packets, waiting {timeout}s for answers...");
+        crate::casket_outln!("Sending discovery packets, waiting {timeout}s for answers...");
     }
 
     let discovery_port = if port == 0 { IPCONF_DISCOVERY_PORT } else { port };
@@ -209,7 +209,7 @@ pub fn scan_with_port(
 
     if !silent {
         let device_count = devices.iter().filter(|d| d.response_type == "device_info").count();
-        println!("Got {device_count} device(s).");
+        crate::casket_outln!("Got {device_count} device(s).");
     }
     Ok(devices)
 }
@@ -269,7 +269,7 @@ pub fn scan_ip_with_port(
     }
 
     if devices.is_empty() && !silent {
-        println!("No eWON response from {ip}");
+        crate::casket_outln!("No eWON response from {ip}");
     }
     Ok(devices)
 }
@@ -304,7 +304,7 @@ pub fn read_tag_values(ip: &str, port: u16, creds: Option<(&str, &str)>) -> Resu
 
 fn print_device(dev: &EwonDevice) {
     if dev.response_type == "device_info" {
-        println!(
+        crate::casket_outln!(
             "  - {}, {}, {}, {}, Pcode: {}",
             dev.identifier.as_deref().unwrap_or("?"),
             dev.ip.as_deref().unwrap_or("?"),
@@ -313,7 +313,7 @@ fn print_device(dev: &EwonDevice) {
             dev.product_code.as_deref().unwrap_or("?")
         );
     } else if let Some(fw) = &dev.firmware {
-        println!("    Firmware: {fw}");
+        crate::casket_outln!("    Firmware: {fw}");
     }
 }
 

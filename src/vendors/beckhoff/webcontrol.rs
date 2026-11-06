@@ -66,11 +66,11 @@ fn soap_write(target_ip: &str, port: u16, uuid: &str, index_offset: &str, pdata:
         .send_string(&soap)
     {
         Ok(_) => {
-            println!("SOAP Write succeeded.");
+            crate::casket_outln!("SOAP Write succeeded.");
             true
         }
         Err(e) => {
-            println!("SOAP Write failed: {e}");
+            crate::casket_outln!("SOAP Write failed: {e}");
             false
         }
     }
@@ -82,7 +82,7 @@ pub fn reboot(target_ip: &str, port: u16) -> Result<bool> {
     let effective_port = if port == 0 { DEFAULT_WEB_PORT } else { port };
 
     let Some(uuid) = get_uuid(target_ip) else { bail!("Could not discover UPnP UUID for {target_ip}") };
-    println!("UUID: {uuid}");
+    crate::casket_outln!("UUID: {uuid}");
 
     if soap_write(
         target_ip,
@@ -132,7 +132,7 @@ pub fn add_user(target_ip: &str, port: u16, username: &str, password: &str) -> R
     }
 
     let pdata = general_purpose::STANDARD.encode(&full);
-    println!("Adding user '{username}' with SOAP payload");
+    crate::casket_outln!("Adding user '{username}' with SOAP payload");
 
     if soap_write(
         target_ip,

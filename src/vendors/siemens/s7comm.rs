@@ -437,7 +437,7 @@ pub fn get_cpu_state(ip: &str, port: u16, timeout_secs: u64, password: Option<&s
 pub fn change_cpu_state(ip: &str, port: u16, timeout_secs: u64, password: Option<&str>) -> bool {
     let cur_state = get_cpu_state(ip, port, timeout_secs, password);
     if cur_state == "Unknown" {
-        println!("Cannot determine CPU state, aborting");
+        crate::casket_outln!("Cannot determine CPU state, aborting");
         return false;
     }
 

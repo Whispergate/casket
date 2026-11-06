@@ -241,21 +241,21 @@ pub fn ingest_file(path: &str) -> Result<Vec<DeviceObservation>> {
 /// Print a table of observed ICS devices.
 pub fn print_table(obs: &[DeviceObservation]) {
     if obs.is_empty() {
-        println!("No ICS devices detected in capture.");
+        crate::casket_outln!("No ICS devices detected in capture.");
         return;
     }
-    println!(
+    crate::casket_outln!(
         "{:<18} {:<7} {:<14} {:>8}  First Seen",
         "IP Address", "Port", "Protocol", "Packets"
     );
-    println!("{}", "-".repeat(70));
+    crate::casket_outln!("{}", "-".repeat(70));
     for d in obs {
         let ts = if d.first_seen == 0 {
             "unknown".to_string()
         } else {
             format!("T+{}s", d.first_seen)
         };
-        println!(
+        crate::casket_outln!(
             "{:<18} {:<7} {:<14} {:>8}  {}",
             d.ip, d.port, d.protocol, d.packet_count, ts
         );
@@ -281,7 +281,7 @@ pub fn live_capture(iface: Option<&str>, output: Option<&str>, max_packets: u64)
     };
 
     let iface_name = device.name.clone();
-    println!("Capturing on {iface_name} (Ctrl-C to stop)…");
+    crate::casket_outln!("Capturing on {iface_name} (Ctrl-C to stop)…");
 
     let mut cap = Capture::from_device(device)
         .map_err(|e| anyhow::anyhow!("open device: {e}"))?
@@ -327,7 +327,7 @@ pub fn live_capture(iface: Option<&str>, output: Option<&str>, max_packets: u64)
     result.sort_by_key(|d| std::cmp::Reverse(d.packet_count));
     print_table(&result);
     if let Some(path) = output {
-        println!("Saved {count} packets to {path}");
+        crate::casket_outln!("Saved {count} packets to {path}");
     }
     Ok(())
 }

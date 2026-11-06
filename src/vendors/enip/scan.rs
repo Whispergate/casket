@@ -115,7 +115,7 @@ pub fn scan(interface: &NetworkInterface, timeout: u64, silent: bool) -> Result<
     }
 
     if devices.is_empty() && !silent {
-        println!("No EtherNet/IP devices found.");
+        crate::casket_outln!("No EtherNet/IP devices found.");
     }
 
     Ok(devices)
@@ -132,7 +132,7 @@ pub fn scan_ip(ip: &str, timeout: u64, silent: bool) -> Result<Vec<EnipDevice>> 
     let mut buf = [0u8; 1024];
     let Ok((n, addr)) = sock.recv_from(&mut buf) else {
         if !silent {
-            println!("No EtherNet/IP response from {ip}");
+            crate::casket_outln!("No EtherNet/IP response from {ip}");
         }
         return Ok(vec![]);
     };
@@ -160,7 +160,7 @@ fn print_device(d: &EnipDevice) {
     let vendor_id_int = u32::from_str_radix(&d.vendor_id, 16).unwrap_or(0);
     let vname = vendor_name(vendor_id_int);
     let dtype = device_type_name(d.device_type);
-    println!(
+    crate::casket_outln!(
         "  {:<25} | {:<16} | {:<30} | {:<20}",
         d.product_name, d.ip, dtype, vname
     );

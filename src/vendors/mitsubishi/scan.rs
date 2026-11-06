@@ -146,7 +146,7 @@ pub fn scan(
     sock.send_to(&pkt, format!("255.255.255.255:{DISCOVERY_PORT}"))?;
 
     if !silent {
-        println!("Scanning for Mitsubishi devices ({timeout}s timeout)...");
+        crate::casket_outln!("Scanning for Mitsubishi devices ({timeout}s timeout)...");
     }
 
     let mut devices = Vec::new();
@@ -172,7 +172,7 @@ pub fn scan(
     }
 
     if devices.is_empty() && !silent {
-        println!("No Mitsubishi devices found.");
+        crate::casket_outln!("No Mitsubishi devices found.");
     }
     Ok(devices)
 }
@@ -205,7 +205,7 @@ pub fn scan_ip_with_transport(
                 return Ok(udp);
             }
             if !silent {
-                println!(
+                crate::casket_outln!(
                     "No Mitsubishi UDP discovery response from {ip}; trying TCP {}...",
                     effective_slmp_port(port)
                 );
@@ -242,13 +242,13 @@ fn scan_ip_udp(ip: &str, timeout: u64, silent: bool) -> Result<Vec<MitsubishiDev
     if let Ok((n, addr)) = sock2.recv_from(&mut buf) {
         let dev = parse_slmp_response(&buf[..n], &addr.ip().to_string());
         if !silent {
-            println!("  Found {} at {} (SLMP)", dev.plc_type, dev.ip);
+            crate::casket_outln!("  Found {} at {} (SLMP)", dev.plc_type, dev.ip);
         }
         return Ok(vec![dev]);
     }
 
     if !silent {
-        println!("No Mitsubishi response from {ip}");
+        crate::casket_outln!("No Mitsubishi response from {ip}");
     }
     Ok(vec![])
 }
@@ -258,12 +258,12 @@ fn scan_ip_tcp(ip: &str, _timeout: u64, silent: bool, port: u16) -> Vec<Mitsubis
     if slmp::read_word_devices(ip, port, "D", 0, 1).is_ok() {
         let dev = tcp_device(ip, port);
         if !silent {
-            println!("  Found {} at {} (SLMP TCP {port})", dev.plc_type, dev.ip);
+            crate::casket_outln!("  Found {} at {} (SLMP TCP {port})", dev.plc_type, dev.ip);
         }
         vec![dev]
     } else {
         if !silent {
-            println!("No Mitsubishi TCP SLMP response from {ip}:{port}");
+            crate::casket_outln!("No Mitsubishi TCP SLMP response from {ip}:{port}");
         }
         vec![]
     }
@@ -284,7 +284,7 @@ fn print_device(d: &MitsubishiDevice) {
         (None, Some(c)) => format!(" (Comment: {c})"),
         _ => String::new(),
     };
-    println!("  Found {} at {}{}", d.plc_type, d.ip, extra);
+    crate::casket_outln!("  Found {} at {}{}", d.plc_type, d.ip, extra);
 }
 
 fn hex_decode(s: &str) -> Vec<u8> {

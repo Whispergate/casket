@@ -6,5 +6,6 @@ pub mod modbus;
 pub mod modbus_fdi;
 pub mod modbus_server;
 pub mod network;
+pub mod output;
 pub mod portscan;
 pub mod shellshock;

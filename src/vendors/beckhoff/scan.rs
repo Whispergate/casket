@@ -144,7 +144,7 @@ pub fn discover(
     sock.send_to(&pkt, format!("255.255.255.255:{DISCOVERY_PORT}"))?;
 
     if !silent {
-        println!("Scanning for Beckhoff devices ({timeout}s timeout)...");
+        crate::casket_outln!("Scanning for Beckhoff devices ({timeout}s timeout)...");
     }
 
     let mut devices = Vec::new();
@@ -155,7 +155,7 @@ pub fn discover(
             Ok((n, addr)) => {
                 if let Some(dev) = parse_discovery_frame(&buf[..n], &addr.ip().to_string()) {
                     if !silent {
-                        println!(
+                        crate::casket_outln!(
                             "  {}: {} (NetID: {}, TC: {}, OS: {})",
                             dev.ip, dev.name, dev.netid_str, dev.tc_version, dev.kernel
                         );
@@ -174,7 +174,7 @@ pub fn discover(
     }
 
     if devices.is_empty() && !silent {
-        println!("No Beckhoff devices found.");
+        crate::casket_outln!("No Beckhoff devices found.");
     }
 
     Ok(devices)
@@ -198,7 +198,7 @@ pub fn discover_ip(ip: &str, timeout: u64, silent: bool) -> Result<Vec<BeckhoffD
     let mut buf = [0u8; 1024];
     let Ok((n, addr)) = sock.recv_from(&mut buf) else {
         if !silent {
-            println!("No Beckhoff response from {ip}");
+            crate::casket_outln!("No Beckhoff response from {ip}");
         }
         return Ok(vec![]);
     };
@@ -208,7 +208,7 @@ pub fn discover_ip(ip: &str, timeout: u64, silent: bool) -> Result<Vec<BeckhoffD
     };
 
     if !silent {
-        println!(
+        crate::casket_outln!(
             "  {}: {} (NetID: {}, TC: {}, OS: {})",
             dev.ip, dev.name, dev.netid_str, dev.tc_version, dev.kernel
         );
@@ -228,7 +228,7 @@ pub fn discover_ip_with_port(
     if !udp.is_empty() {
         if !silent {
             for dev in &udp {
-                println!(
+                crate::casket_outln!(
                     "  {}: {} (NetID: {}, TC: {}, OS: {})",
                     dev.ip, dev.name, dev.netid_str, dev.tc_version, dev.kernel
                 );
@@ -239,7 +239,7 @@ pub fn discover_ip_with_port(
 
     let Some(dev) = derived_ads_device(ip, port) else {
         if !silent {
-            println!("No Beckhoff response from {ip}");
+            crate::casket_outln!("No Beckhoff response from {ip}");
         }
         return Ok(vec![]);
     };
@@ -248,13 +248,13 @@ pub fn discover_ip_with_port(
     let state = get_state(&dev, &local_netid, port);
     if state == "ERROR" {
         if !silent {
-            println!("No Beckhoff UDP discovery or ADS TCP response from {ip}");
+            crate::casket_outln!("No Beckhoff UDP discovery or ADS TCP response from {ip}");
         }
         return Ok(vec![]);
     }
 
     if !silent {
-        println!(
+        crate::casket_outln!(
             "  {}: {} (NetID: {}, ADS TCP {}, state {state})",
             dev.ip,
             dev.name,
@@ -394,11 +394,11 @@ pub fn set_twincat_state(
     let ams = parse_ams_response(&buf[..n]);
     match ams {
         Some(r) if r.error_code == "00000000" => {
-            println!("TwinCAT state changed to {}", mode.to_uppercase());
+            crate::casket_outln!("TwinCAT state changed to {}", mode.to_uppercase());
             Ok(true)
         }
         Some(r) => {
-            println!("State change failed (error: {})", r.error_code);
+            crate::casket_outln!("State change failed (error: {})", r.error_code);
             Ok(false)
         }
         None => Ok(false),

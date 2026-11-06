@@ -47,10 +47,10 @@ pub fn fdi_loop(
                         format!("Coil[{address}] = {s}")
                     }
                 };
-                println!("[{writes:>4}] FDI write OK: {label}");
+                crate::casket_outln!("[{writes:>4}] FDI write OK: {label}");
             }
             Err(e) => {
-                println!("[{writes:>4}] FDI write FAILED: {e}");
+                crate::casket_outln!("[{writes:>4}] FDI write FAILED: {e}");
             }
         }
 
