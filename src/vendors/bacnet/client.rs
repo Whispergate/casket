@@ -99,12 +99,12 @@ fn read_property_pdu(invoke_id: u8, instance: u32, property_id: u8) -> Vec<u8> {
 }
 
 /// Send a unicast Who-Is to `ip:port` and return the raw I-Am response bytes, if any.
-fn unicast_who_is(ip: &str, timeout: Duration) -> Option<(Vec<u8>, SocketAddr)> {
+fn unicast_who_is(ip: &str, port: u16, timeout: Duration) -> Option<(Vec<u8>, SocketAddr)> {
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.set_read_timeout(Some(timeout)).ok()?;
     socket.set_write_timeout(Some(timeout)).ok()?;
 
-    let target: SocketAddr = format!("{ip}:{BACNET_PORT}").parse().ok()?;
+    let target: SocketAddr = format!("{ip}:{port}").parse().ok()?;
     let pkt = bvlc_unicast(&who_is_pdu());
     socket.send_to(&pkt, target).ok()?;
 
@@ -330,18 +330,25 @@ fn resolve_length(data: &[u8], length_bits: u8) -> Option<(usize, usize)> {
 /// Probe a single IP for a `BACnet` device using unicast Who-Is.
 /// Returns a `BacnetDevice` if the host responds with a valid I-Am.
 pub fn scan_ip(ip: &str, timeout_secs: u64) -> Option<BacnetDevice> {
+    scan_ip_with_port(ip, BACNET_PORT, timeout_secs)
+}
+
+/// Probe one BACnet/IP device at an explicit UDP port using unicast Who-Is and
+/// read-only `ReadProperty` requests. `port = 0` retains the default 47808.
+pub fn scan_ip_with_port(ip: &str, port: u16, timeout_secs: u64) -> Option<BacnetDevice> {
+    let port = if port == 0 { BACNET_PORT } else { port };
     let timeout = Duration::from_secs(timeout_secs);
-    let (raw, _src) = unicast_who_is(ip, timeout)?;
+    let (raw, _src) = unicast_who_is(ip, port, timeout)?;
     let (instance, vendor_id, max_apdu) = parse_i_am(&raw)?;
 
     // Read optional properties (best-effort, don't fail scan if unavailable)
-    let object_name = read_property(ip, instance, PROP_OBJECT_NAME, timeout)
+    let object_name = read_property_with_port(ip, port, instance, PROP_OBJECT_NAME, timeout)
         .unwrap_or_default();
-    let vendor_name = read_property(ip, instance, PROP_VENDOR_NAME, timeout)
+    let vendor_name = read_property_with_port(ip, port, instance, PROP_VENDOR_NAME, timeout)
         .unwrap_or_default();
-    let description = read_property(ip, instance, PROP_DESCRIPTION, timeout)
+    let description = read_property_with_port(ip, port, instance, PROP_DESCRIPTION, timeout)
         .unwrap_or_default();
-    let firmware_revision = read_property(ip, instance, PROP_FIRMWARE_REVISION, timeout)
+    let firmware_revision = read_property_with_port(ip, port, instance, PROP_FIRMWARE_REVISION, timeout)
         .unwrap_or_default();
 
     Some(BacnetDevice {
@@ -363,11 +370,24 @@ pub fn read_property(
     property_id: u8,
     timeout: Duration,
 ) -> Option<String> {
+    read_property_with_port(ip, BACNET_PORT, instance, property_id, timeout)
+}
+
+/// Read one `BACnet` property from an explicit UDP port without changing device
+/// state. `port = 0` uses the standard BACnet/IP port.
+pub fn read_property_with_port(
+    ip: &str,
+    port: u16,
+    instance: u32,
+    property_id: u8,
+    timeout: Duration,
+) -> Option<String> {
+    let port = if port == 0 { BACNET_PORT } else { port };
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.set_read_timeout(Some(timeout)).ok()?;
     socket.set_write_timeout(Some(timeout)).ok()?;
 
-    let target: SocketAddr = format!("{ip}:{BACNET_PORT}").parse().ok()?;
+    let target: SocketAddr = format!("{ip}:{port}").parse().ok()?;
     let pdu = read_property_pdu(1, instance, property_id);
     let pkt = bvlc_unicast(&pdu);
     socket.send_to(&pkt, target).ok()?;
@@ -475,6 +495,42 @@ mod tests {
         assert_eq!(instance, 1);
         assert_eq!(vendor_id, 5);
         assert_eq!(max_apdu, 480);
+    }
+
+    #[test]
+    fn parse_i_am_accepts_the_loopback_fixture_vector() {
+        let pkt = vec![
+            0x81, 0x0A, 0x00, 0x15,
+            0x01, 0x00, 0x10, 0x00,
+            0xC4, 0x02, 0x00, 0x03, 0xE8, // device instance 1000
+            0x22, 0x05, 0xC4,             // max APDU 1476
+            0x91, 0x03,
+            0x22, 0x03, 0xE7,             // vendor ID 999
+        ];
+        assert_eq!(parse_i_am(&pkt), Some((1000, 999, 1476)));
+    }
+
+    #[test]
+    fn unicast_who_is_round_trip_uses_the_requested_loopback_port() {
+        use std::thread;
+
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let port = server.local_addr().unwrap().port();
+        let worker = thread::spawn(move || {
+            let mut request = [0u8; 64];
+            let (len, peer) = server.recv_from(&mut request).unwrap();
+            assert_eq!(&request[..len], bvlc_unicast(&who_is_pdu()));
+            let response = vec![
+                0x81, 0x0A, 0x00, 0x15,
+                0x01, 0x00, 0x10, 0x00,
+                0xC4, 0x02, 0x00, 0x03, 0xE8,
+                0x22, 0x05, 0xC4, 0x91, 0x03, 0x22, 0x03, 0xE7,
+            ];
+            server.send_to(&response, peer).unwrap();
+        });
+        let response = unicast_who_is("127.0.0.1", port, Duration::from_secs(1)).unwrap();
+        worker.join().unwrap();
+        assert_eq!(parse_i_am(&response.0), Some((1000, 999, 1476)));
     }
 
     #[test]

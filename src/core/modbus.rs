@@ -81,6 +81,15 @@ impl ModbusTcpClient {
         self
     }
 
+    /// Use exactly one Modbus unit id instead of the discovery defaults.
+    ///
+    /// Callers that know the device's configured unit id should prefer this to
+    /// probing the default `[0x01, 0xFF]` pair.
+    pub fn with_unit_id(mut self, unit_id: u8) -> Self {
+        self.unit_ids = vec![unit_id];
+        self
+    }
+
     /// Override the connect/read/write timeout (clamped to at least 1 second).
     pub fn with_timeout_secs(mut self, timeout_secs: u64) -> Self {
         self.timeout = Duration::from_secs(timeout_secs.max(1));
@@ -289,9 +298,13 @@ fn read_words(
     count: u16,
     fc: u8,
     offset: u32,
+    unit_id: Option<u8>,
 ) -> Result<Vec<ModbusRegister>> {
     let count = count.clamp(1, MAX_REGISTERS);
-    let client = ModbusTcpClient::new(ip).with_port(port);
+    let client = match unit_id {
+        Some(unit_id) => ModbusTcpClient::new(ip).with_port(port).with_unit_id(unit_id),
+        None => ModbusTcpClient::new(ip).with_port(port),
+    };
     let reply = client.transact(&read_request_pdu(fc, start, count), fc)?;
 
     let byte_count = usize::from(
@@ -306,7 +319,8 @@ fn read_words(
         .context("register response truncated")?;
 
     let mut registers = Vec::with_capacity(byte_count / 2);
-    for (i, word) in words.chunks_exact(2).enumerate() {
+    let (word_pairs, _remainder) = words.as_chunks::<2>();
+    for (i, word) in word_pairs.iter().enumerate() {
         let raw = u16::from_be_bytes([word[0], word[1]]);
         let address = start.wrapping_add(u16::try_from(i).unwrap_or(u16::MAX));
         registers.push(ModbusRegister {
@@ -326,9 +340,13 @@ fn read_bits(
     count: u16,
     fc: u8,
     offset: u32,
+    unit_id: Option<u8>,
 ) -> Result<Vec<ModbusRegister>> {
     let count = count.clamp(1, MAX_BITS);
-    let client = ModbusTcpClient::new(ip).with_port(port);
+    let client = match unit_id {
+        Some(unit_id) => ModbusTcpClient::new(ip).with_port(port).with_unit_id(unit_id),
+        None => ModbusTcpClient::new(ip).with_port(port),
+    };
     let reply = client.transact(&read_request_pdu(fc, start, count), fc)?;
 
     let byte_count = usize::from(
@@ -366,7 +384,18 @@ pub fn read_holding_registers(
     start: u16,
     count: u16,
 ) -> Result<Vec<ModbusRegister>> {
-    read_words(ip, port, start, count, 0x03, 40001)
+    read_words(ip, port, start, count, 0x03, 40001, None)
+}
+
+/// Read holding registers using an explicitly configured Modbus unit id.
+pub fn read_holding_registers_with_unit_id(
+    ip: &str,
+    port: u16,
+    unit_id: u8,
+    start: u16,
+    count: u16,
+) -> Result<Vec<ModbusRegister>> {
+    read_words(ip, port, start, count, 0x03, 40001, Some(unit_id))
 }
 
 /// Read `count` input registers (FC 0x04) starting at `start`; display addresses use the 3xxxx range.
@@ -376,7 +405,7 @@ pub fn read_input_registers(
     start: u16,
     count: u16,
 ) -> Result<Vec<ModbusRegister>> {
-    read_words(ip, port, start, count, 0x04, 30001)
+    read_words(ip, port, start, count, 0x04, 30001, None)
 }
 
 /// Read `count` coils (FC 0x01) starting at `start`; each register decodes to "ON"/"OFF".
@@ -386,7 +415,18 @@ pub fn read_coils(
     start: u16,
     count: u16,
 ) -> Result<Vec<ModbusRegister>> {
-    read_bits(ip, port, start, count, 0x01, 1)
+    read_bits(ip, port, start, count, 0x01, 1, None)
+}
+
+/// Read coils using an explicitly configured Modbus unit id.
+pub fn read_coils_with_unit_id(
+    ip: &str,
+    port: u16,
+    unit_id: u8,
+    start: u16,
+    count: u16,
+) -> Result<Vec<ModbusRegister>> {
+    read_bits(ip, port, start, count, 0x01, 1, Some(unit_id))
 }
 
 /// Read `count` discrete inputs (FC 0x02) starting at `start`; display addresses use the 1xxxx range.
@@ -396,11 +436,32 @@ pub fn read_discrete_inputs(
     start: u16,
     count: u16,
 ) -> Result<Vec<ModbusRegister>> {
-    read_bits(ip, port, start, count, 0x02, 10001)
+    read_bits(ip, port, start, count, 0x02, 10001, None)
 }
 
 /// Write a single coil (FC 0x05) to on/off at `address`.
 pub fn write_single_coil(ip: &str, port: u16, address: u16, on: bool) -> Result<()> {
+    write_single_coil_inner(ip, port, None, address, on)
+}
+
+/// Write a single coil (FC 0x05) using an explicitly configured Modbus unit id.
+pub fn write_single_coil_with_unit_id(
+    ip: &str,
+    port: u16,
+    unit_id: u8,
+    address: u16,
+    on: bool,
+) -> Result<()> {
+    write_single_coil_inner(ip, port, Some(unit_id), address, on)
+}
+
+fn write_single_coil_inner(
+    ip: &str,
+    port: u16,
+    unit_id: Option<u8>,
+    address: u16,
+    on: bool,
+) -> Result<()> {
     let value: u16 = if on { 0xFF00 } else { 0x0000 };
     let pdu = [
         0x05,
@@ -409,12 +470,37 @@ pub fn write_single_coil(ip: &str, port: u16, address: u16, on: bool) -> Result<
         (value >> 8) as u8,
         (value & 0xFF) as u8,
     ];
-    ModbusTcpClient::new(ip).with_port(port).transact(&pdu, 0x05)?;
+    let client = match unit_id {
+        Some(unit_id) => ModbusTcpClient::new(ip).with_port(port).with_unit_id(unit_id),
+        None => ModbusTcpClient::new(ip).with_port(port),
+    };
+    client.transact(&pdu, 0x05)?;
     Ok(())
 }
 
 /// Write a single holding register (FC 0x06) at `address`.
 pub fn write_single_register(ip: &str, port: u16, address: u16, value: u16) -> Result<()> {
+    write_single_register_inner(ip, port, None, address, value)
+}
+
+/// Write one holding register (FC 0x06) using an explicitly configured Modbus unit id.
+pub fn write_single_register_with_unit_id(
+    ip: &str,
+    port: u16,
+    unit_id: u8,
+    address: u16,
+    value: u16,
+) -> Result<()> {
+    write_single_register_inner(ip, port, Some(unit_id), address, value)
+}
+
+fn write_single_register_inner(
+    ip: &str,
+    port: u16,
+    unit_id: Option<u8>,
+    address: u16,
+    value: u16,
+) -> Result<()> {
     let pdu = [
         0x06,
         (address >> 8) as u8,
@@ -422,13 +508,38 @@ pub fn write_single_register(ip: &str, port: u16, address: u16, value: u16) -> R
         (value >> 8) as u8,
         (value & 0xFF) as u8,
     ];
-    ModbusTcpClient::new(ip).with_port(port).transact(&pdu, 0x06)?;
+    let client = match unit_id {
+        Some(unit_id) => ModbusTcpClient::new(ip).with_port(port).with_unit_id(unit_id),
+        None => ModbusTcpClient::new(ip).with_port(port),
+    };
+    client.transact(&pdu, 0x06)?;
     Ok(())
 }
 
 /// Write consecutive holding registers (FC 0x10) starting at `start`; returns the count written
 /// (values are capped at the Modbus per-request maximum of 125).
 pub fn write_multiple_registers(ip: &str, port: u16, start: u16, values: &[u16]) -> Result<u16> {
+    write_multiple_registers_inner(ip, port, None, start, values)
+}
+
+/// Write consecutive holding registers (FC 0x10) using an explicitly configured Modbus unit id.
+pub fn write_multiple_registers_with_unit_id(
+    ip: &str,
+    port: u16,
+    unit_id: u8,
+    start: u16,
+    values: &[u16],
+) -> Result<u16> {
+    write_multiple_registers_inner(ip, port, Some(unit_id), start, values)
+}
+
+fn write_multiple_registers_inner(
+    ip: &str,
+    port: u16,
+    unit_id: Option<u8>,
+    start: u16,
+    values: &[u16],
+) -> Result<u16> {
     if values.is_empty() {
         bail!("write_multiple_registers: empty values slice");
     }
@@ -449,7 +560,11 @@ pub fn write_multiple_registers(ip: &str, port: u16, start: u16, values: &[u16])
         pdu.push((v >> 8) as u8);
         pdu.push((v & 0xFF) as u8);
     }
-    let reply = ModbusTcpClient::new(ip).with_port(port).transact(&pdu, 0x10)?;
+    let client = match unit_id {
+        Some(unit_id) => ModbusTcpClient::new(ip).with_port(port).with_unit_id(unit_id),
+        None => ModbusTcpClient::new(ip).with_port(port),
+    };
+    let reply = client.transact(&pdu, 0x10)?;
     let written = reply.data.get(2..4).context("FC16 response truncated")?;
     Ok(u16::from_be_bytes([written[0], written[1]]))
 }
@@ -515,6 +630,26 @@ mod tests {
         let regs = read_holding_registers("127.0.0.1", port, 0, 1).unwrap();
         handle.join().unwrap();
         assert_eq!(regs[0].raw, 4321);
+    }
+
+    #[test]
+    fn explicit_unit_id_is_used_without_discovery_fallback() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut req = [0u8; 12];
+            stream.read_exact(&mut req).unwrap();
+            assert_eq!(req[6], 100);
+            stream
+                .write_all(&modbus_response(&req, 100, 0x03, &[0x02, 0x00, 0x46]))
+                .unwrap();
+        });
+
+        let regs = read_holding_registers_with_unit_id("127.0.0.1", port, 100, 501, 1).unwrap();
+        handle.join().unwrap();
+        assert_eq!(regs[0].raw, 70);
     }
 
     #[test]

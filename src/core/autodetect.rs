@@ -58,6 +58,20 @@ pub struct ProbeInfo {
     pub transport: &'static str,
 }
 
+/// Metadata for one built-in protocol exposed by Casket.
+///
+/// Consumers can use this catalog to present exactly the protocols implemented by
+/// Casket without maintaining a second, easily-stale list.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct ProtocolInfo {
+    /// Stable protocol selector used with [`probe_builtin`].
+    pub slug: &'static str,
+    /// Human-readable protocol name.
+    pub label: &'static str,
+    /// Transport and default port(s) used by the probe.
+    pub transport: &'static str,
+}
+
 /// One protocol's result from `sweep`: what was probed and what (if anything) responded.
 pub struct SweepOutcome {
     pub probe: ProbeInfo,
@@ -67,6 +81,7 @@ pub struct SweepOutcome {
 /// A single vendor probe entry: slug, display metadata, and detection function.
 ///
 /// Pass to [`VendorRegistry::register`] to add a custom vendor alongside the built-ins.
+#[derive(Clone, Copy)]
 pub struct VendorProbe {
     /// Short identifier stored in [`DeviceInfo::vendor`] (e.g. `"beckhoff"`).
     pub slug: &'static str,
@@ -482,9 +497,49 @@ fn probe_opcua(ip: &str) -> Option<DeviceInfo> {
     Some(DeviceInfo { vendor: "opcua".into(), ip: ip.into(), fields })
 }
 
+const BUILTIN_PROBES: &[VendorProbe] = &[
+    VendorProbe { slug: "beckhoff", label: "Beckhoff ADS", transport: "UDP 48899 / TCP 48898", probe: probe_beckhoff },
+    VendorProbe { slug: "siemens", label: "Siemens S7", transport: "TCP 102", probe: probe_siemens },
+    VendorProbe { slug: "enip", label: "EtherNet/IP", transport: "TCP 44818", probe: probe_enip },
+    VendorProbe { slug: "ewon", label: "eWON", transport: "UDP 1507", probe: probe_ewon },
+    VendorProbe { slug: "mitsubishi", label: "Mitsubishi MELSEC", transport: "UDP 5561 / TCP 5007", probe: probe_mitsubishi },
+    VendorProbe { slug: "schneider", label: "Schneider Modbus", transport: "TCP 502 / UDP", probe: probe_schneider },
+    VendorProbe { slug: "phoenix", label: "Phoenix Contact", transport: "TCP 1962", probe: probe_phoenix },
+    VendorProbe { slug: "omron", label: "Omron FINS", transport: "TCP/UDP 9600", probe: probe_omron },
+    VendorProbe { slug: "iec104", label: "IEC 60870-5-104", transport: "TCP 2404", probe: probe_iec104 },
+    VendorProbe { slug: "snmp", label: "SNMP", transport: "UDP 161", probe: probe_snmp },
+    VendorProbe { slug: "mqtt", label: "MQTT", transport: "TCP 1883", probe: probe_mqtt },
+    VendorProbe { slug: "bacnet", label: "BACnet/IP", transport: "UDP 47808", probe: probe_bacnet },
+    VendorProbe { slug: "dnp3", label: "DNP3", transport: "TCP 20000", probe: probe_dnp3 },
+    VendorProbe { slug: "opcua", label: "OPC-UA", transport: "TCP 4840", probe: probe_opcua },
+];
+
+/// Return metadata for every built-in protocol probe.
+pub fn builtin_protocols() -> Vec<ProtocolInfo> {
+    BUILTIN_PROBES
+        .iter()
+        .map(|probe| ProtocolInfo {
+            slug: probe.slug,
+            label: probe.label,
+            transport: probe.transport,
+        })
+        .collect()
+}
+
+/// Run exactly one built-in protocol probe against one IP address.
+///
+/// This avoids an all-protocol sweep when the caller has already selected a
+/// protocol, reducing unnecessary traffic in authorized OT assessments.
+pub fn probe_builtin(slug: &str, ip: &str) -> Option<DeviceInfo> {
+    BUILTIN_PROBES
+        .iter()
+        .find(|probe| probe.slug == slug)
+        .and_then(|probe| (probe.probe)(ip))
+}
+
 /// An extensible registry of vendor probes used for device autodetection.
 ///
-/// Start with [`VendorRegistry::with_builtins`] to include all 16 built-in protocols,
+/// Start with [`VendorRegistry::with_builtins`] to include all 14 built-in protocols,
 /// then call [`VendorRegistry::register`] to add your own vendor alongside them.
 ///
 /// # Example
@@ -509,26 +564,9 @@ pub struct VendorRegistry {
 }
 
 impl VendorRegistry {
-    /// Returns a registry pre-populated with all 16 built-in vendor probes.
+    /// Returns a registry pre-populated with all 14 built-in vendor probes.
     pub fn with_builtins() -> Self {
-        Self {
-            probes: vec![
-                VendorProbe { slug: "beckhoff", label: "Beckhoff ADS", transport: "UDP 48899 / TCP 48898", probe: probe_beckhoff },
-                VendorProbe { slug: "siemens", label: "Siemens S7", transport: "TCP 102", probe: probe_siemens },
-                VendorProbe { slug: "enip", label: "EtherNet/IP", transport: "TCP 44818", probe: probe_enip },
-                VendorProbe { slug: "ewon", label: "eWON", transport: "UDP 1507", probe: probe_ewon },
-                VendorProbe { slug: "mitsubishi", label: "Mitsubishi MELSEC", transport: "UDP 5561 / TCP 5007", probe: probe_mitsubishi },
-                VendorProbe { slug: "schneider", label: "Schneider Modbus", transport: "TCP 502 / UDP", probe: probe_schneider },
-                VendorProbe { slug: "phoenix", label: "Phoenix Contact", transport: "TCP 1962", probe: probe_phoenix },
-                VendorProbe { slug: "omron", label: "Omron FINS", transport: "TCP/UDP 9600", probe: probe_omron },
-                VendorProbe { slug: "iec104", label: "IEC 60870-5-104", transport: "TCP 2404", probe: probe_iec104 },
-                VendorProbe { slug: "snmp", label: "SNMP", transport: "UDP 161", probe: probe_snmp },
-                VendorProbe { slug: "mqtt", label: "MQTT", transport: "TCP 1883", probe: probe_mqtt },
-                VendorProbe { slug: "bacnet", label: "BACnet/IP", transport: "UDP 47808", probe: probe_bacnet },
-                VendorProbe { slug: "dnp3", label: "DNP3", transport: "TCP 20000", probe: probe_dnp3 },
-                VendorProbe { slug: "opcua", label: "OPC-UA", transport: "TCP 4840", probe: probe_opcua },
-            ],
-        }
+        Self { probes: BUILTIN_PROBES.to_vec() }
     }
 
     /// Returns an empty registry. Build your own probe set from scratch.
@@ -595,7 +633,10 @@ impl VendorRegistry {
             .iter()
             .zip(devices)
             .map(|(vp, device)| SweepOutcome {
-                probe: ProbeInfo { label: vp.label, transport: vp.transport },
+                probe: ProbeInfo {
+                    label: vp.label,
+                    transport: vp.transport,
+                },
                 device,
             })
             .collect()
@@ -640,3 +681,26 @@ pub fn probe_all(ip: &str, timeout_secs: u64) -> Vec<DeviceInfo> {
     VendorRegistry::with_builtins().probe_all(ip, timeout_secs)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_protocol_catalog_matches_the_builtin_registry() {
+        let protocols = builtin_protocols();
+        let slugs: Vec<_> = protocols.iter().map(|protocol| protocol.slug).collect();
+
+        assert_eq!(protocols.len(), 14);
+        assert_eq!(slugs, vec![
+            "beckhoff", "siemens", "enip", "ewon", "mitsubishi", "schneider", "phoenix",
+            "omron", "iec104", "snmp", "mqtt", "bacnet", "dnp3", "opcua",
+        ]);
+        assert!(protocols.iter().all(|protocol| !protocol.label.is_empty()));
+        assert!(protocols.iter().all(|protocol| !protocol.transport.is_empty()));
+    }
+
+    #[test]
+    fn unsupported_builtin_probe_returns_none_without_network_io() {
+        assert!(probe_builtin("not-a-protocol", "127.0.0.1").is_none());
+    }
+}

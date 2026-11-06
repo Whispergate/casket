@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use crate::core::network::NetworkInterface;
 
-const DISCOVERY_PORT: u16 = 1507;
+/// eWON IPCONF discovery UDP destination port.
+pub const IPCONF_DISCOVERY_PORT: u16 = 1507;
 const RESPONSE_PORT: u16 = 1506;
 
 const DISCOVERY_PACKETS: &[&str] = &[
@@ -13,7 +14,7 @@ const DISCOVERY_PACKETS: &[&str] = &[
 ];
 
 /// An eWON device discovered over the IPCONF UDP protocol (network, MAC, serial, firmware).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EwonDevice {
     pub ip: Option<String>,
     pub netmask: Option<String>,
@@ -129,8 +130,35 @@ fn parse_response(data: &[u8]) -> Option<EwonDevice> {
     }
 }
 
-/// Broadcast-scan for eWON devices.
-pub fn scan(_interface: &NetworkInterface, timeout: u64, silent: bool) -> Result<Vec<EwonDevice>> {
+/// Broadcast-scan for eWON devices on the selected interface.
+pub fn scan(interface: &NetworkInterface, timeout: u64, silent: bool) -> Result<Vec<EwonDevice>> {
+    scan_with_port(interface, timeout, silent, IPCONF_DISCOVERY_PORT)
+}
+
+/// Record one unique IPCONF reply.
+///
+/// IPCONF discovery deliberately sends two request variants.  Some devices
+/// answer both with the same device-info payload, which must still render as
+/// one discovered device.
+fn record_unique_response(devices: &mut Vec<EwonDevice>, device: EwonDevice) -> bool {
+    if devices.contains(&device) {
+        false
+    } else {
+        devices.push(device);
+        true
+    }
+}
+
+/// Broadcast-scan for eWON devices using an explicit IPCONF UDP destination.
+///
+/// This is discovery-only. It sends the fixed IPCONF requests to the selected
+/// interface's broadcast address and does not contact the web/API endpoint.
+pub fn scan_with_port(
+    interface: &NetworkInterface,
+    timeout: u64,
+    silent: bool,
+    port: u16,
+) -> Result<Vec<EwonDevice>> {
     use socket2::{Domain, Protocol, Socket, Type};
 
     let s = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
@@ -138,10 +166,10 @@ pub fn scan(_interface: &NetworkInterface, timeout: u64, silent: bool) -> Result
     s.set_broadcast(true)?;
     s.set_read_timeout(Some(Duration::from_secs(timeout)))?;
 
-    let bind: std::net::SocketAddr = format!("0.0.0.0:{RESPONSE_PORT}").parse()?;
+    let bind: std::net::SocketAddr = format!("{}:{RESPONSE_PORT}", interface.ip).parse()?;
     if s.bind(&bind.into()).is_err() {
-        // Fall back to any port if 1506 is in use
-        let fallback: std::net::SocketAddr = "0.0.0.0:0".parse()?;
+        // Fall back to an ephemeral port on the selected interface if 1506 is in use.
+        let fallback: std::net::SocketAddr = format!("{}:0", interface.ip).parse()?;
         s.bind(&fallback.into())?;
     }
     let sock = UdpSocket::from(s);
@@ -150,9 +178,11 @@ pub fn scan(_interface: &NetworkInterface, timeout: u64, silent: bool) -> Result
         println!("Sending discovery packets, waiting {timeout}s for answers...");
     }
 
+    let discovery_port = if port == 0 { IPCONF_DISCOVERY_PORT } else { port };
+    let broadcast = crate::core::network::calculate_broadcast(&interface.ip, &interface.netmask);
     for pkt_hex in DISCOVERY_PACKETS {
         let pkt = hex_decode(pkt_hex);
-        let _ = sock.send_to(&pkt, format!("255.255.255.255:{DISCOVERY_PORT}"));
+        let _ = sock.send_to(&pkt, format!("{broadcast}:{discovery_port}"));
     }
 
     let mut devices = Vec::new();
@@ -162,10 +192,9 @@ pub fn scan(_interface: &NetworkInterface, timeout: u64, silent: bool) -> Result
         match sock.recv_from(&mut buf) {
             Ok((n, _)) => {
                 if let Some(dev) = parse_response(&buf[..n]) {
-                    if !silent {
+                    if record_unique_response(&mut devices, dev.clone()) && !silent {
                         print_device(&dev);
                     }
-                    devices.push(dev);
                 }
             }
             Err(e)
@@ -187,6 +216,18 @@ pub fn scan(_interface: &NetworkInterface, timeout: u64, silent: bool) -> Result
 
 /// Send eWON discovery to a specific IP.
 pub fn scan_ip(ip: &str, timeout: u64, silent: bool) -> Result<Vec<EwonDevice>> {
+    scan_ip_with_port(ip, timeout, silent, IPCONF_DISCOVERY_PORT)
+}
+
+/// Send eWON IPCONF discovery to a specific IP and UDP destination port.
+///
+/// This remains a read-only discovery exchange; it never probes the web/API port.
+pub fn scan_ip_with_port(
+    ip: &str,
+    timeout: u64,
+    silent: bool,
+    port: u16,
+) -> Result<Vec<EwonDevice>> {
     use socket2::{Domain, Protocol, Socket, Type};
 
     let s = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
@@ -199,9 +240,10 @@ pub fn scan_ip(ip: &str, timeout: u64, silent: bool) -> Result<Vec<EwonDevice>> 
     }
     let sock = UdpSocket::from(s);
 
+    let discovery_port = if port == 0 { IPCONF_DISCOVERY_PORT } else { port };
     for pkt_hex in DISCOVERY_PACKETS {
         let pkt = hex_decode(pkt_hex);
-        let _ = sock.send_to(&pkt, format!("{ip}:{DISCOVERY_PORT}"));
+        let _ = sock.send_to(&pkt, format!("{ip}:{discovery_port}"));
     }
 
     let mut devices = Vec::new();
@@ -211,10 +253,9 @@ pub fn scan_ip(ip: &str, timeout: u64, silent: bool) -> Result<Vec<EwonDevice>> 
         match sock.recv_from(&mut buf) {
             Ok((n, _)) => {
                 if let Some(dev) = parse_response(&buf[..n]) {
-                    if !silent {
+                    if record_unique_response(&mut devices, dev.clone()) && !silent {
                         print_device(&dev);
                     }
-                    devices.push(dev);
                 }
             }
             Err(e)
@@ -363,5 +404,19 @@ mod tests {
         data[20..27].copy_from_slice(b"14.6s0\0");
         let dev = parse_firmware_info(&data);
         assert_eq!(dev.firmware.as_deref(), Some("14.6s0"));
+    }
+
+    #[test]
+    fn repeated_ipconf_reply_is_listed_once() {
+        let mut raw = vec![0u8; 38];
+        raw[..4].copy_from_slice(b"IPCO");
+        raw[15] = 2;
+        raw[20..24].copy_from_slice(&[1, 0, 0, 127]);
+        raw[32..38].copy_from_slice(&[0xde, 0xad, 0xbe, 0xef, 0x00, 0x01]);
+        let device = parse_response(&raw).unwrap();
+        let mut devices = Vec::new();
+        assert!(record_unique_response(&mut devices, device.clone()));
+        assert!(!record_unique_response(&mut devices, device));
+        assert_eq!(devices.len(), 1);
     }
 }

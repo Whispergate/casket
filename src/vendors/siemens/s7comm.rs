@@ -194,15 +194,16 @@ fn parse_coil_data(s7_hex: &str) -> Option<HashMap<String, u8>> {
 
 /// Write output bits to an S7 PLC.
 pub fn set_outputs(ip: &str, binary_str: &str, port: u16, timeout_secs: u64, password: Option<&str>) -> bool {
-    let hex_val = bits_to_hex_byte(binary_str);
+    let byte_value = u8::from_str_radix(&bits_to_hex_byte(binary_str), 16).unwrap_or(0);
     let Some(mut stream) = connect_authenticated(ip, port, timeout_secs, password) else {
         return false;
     };
 
-    let pkt_str = format!(
-        "03000024 02f08032010000732f000e00050501120a10020001000082000000000400 08{hex_val}"
-    );
-    let Some(resp) = send_recv(&mut stream, &hex_decode(&pkt_str)) else { return false };
+    let packet = build_byte_write_packet(0x732f, 0x82, 0, byte_value)
+        .expect("fixed output-byte address must fit an S7ANY address");
+    let Some(resp) = send_recv(&mut stream, &packet) else {
+        return false;
+    };
     let hex = hex_encode(&resp);
     hex.len() >= 2 && &hex[hex.len() - 2..] == "ff"
 }
@@ -216,23 +217,39 @@ pub fn set_merkers(
     timeout_secs: u64,
     password: Option<&str>,
 ) -> bool {
-    let hex_val = bits_to_hex_byte(binary_str);
-    if offset > 0x1F_FFFF {
+    let byte_value = u8::from_str_radix(&bits_to_hex_byte(binary_str), 16).unwrap_or(0);
+    let Some(packet) = build_byte_write_packet(0x0015, 0x83, offset, byte_value) else {
         return false;
-    }
-    let bit_addr = offset * 8;
-    let merker_offset = format!("{bit_addr:06x}");
+    };
 
     let Some(mut stream) = connect_authenticated(ip, port, timeout_secs, password) else {
         return false;
     };
 
-    let pkt_str = format!(
-        "03000025 02f080320100001500000e00060501120a10040001000083{merker_offset}00040010{hex_val}00"
-    );
-    let Some(resp) = send_recv(&mut stream, &hex_decode(&pkt_str)) else { return false };
+    let Some(resp) = send_recv(&mut stream, &packet) else {
+        return false;
+    };
     let hex = hex_encode(&resp);
     hex.len() >= 2 && &hex[hex.len() - 2..] == "ff"
+}
+
+/// Build the one-byte `S7Comm` `WriteVar` message shared by output and merker
+/// writes.  The S7ANY address is expressed in bits, while the data item length
+/// is eight bits and therefore carries exactly one byte.
+fn build_byte_write_packet(
+    pdu_reference: u16,
+    area: u8,
+    byte_offset: u32,
+    byte_value: u8,
+) -> Option<Vec<u8>> {
+    let bit_address = byte_offset.checked_mul(8)?;
+    if bit_address > 0x00ff_ffff {
+        return None;
+    }
+
+    Some(hex_decode(&format!(
+        "03000024 02f08032010000{pdu_reference:04x}000e00050501120a100200010000{area:02x}{bit_address:06x}00040008{byte_value:02x}"
+    )))
 }
 
 /// Read `length` bytes from data block `db_num` starting at byte `offset`.
@@ -417,8 +434,8 @@ pub fn get_cpu_state(ip: &str, port: u16, timeout_secs: u64, password: Option<&s
 }
 
 /// Toggle the CPU state (Running ↔ Stopped).
-pub fn change_cpu_state(ip: &str, port: u16, timeout_secs: u64) -> bool {
-    let cur_state = get_cpu_state(ip, port, timeout_secs, None);
+pub fn change_cpu_state(ip: &str, port: u16, timeout_secs: u64, password: Option<&str>) -> bool {
+    let cur_state = get_cpu_state(ip, port, timeout_secs, password);
     if cur_state == "Unknown" {
         println!("Cannot determine CPU state, aborting");
         return false;
@@ -445,6 +462,22 @@ pub fn change_cpu_state(ip: &str, port: u16, timeout_secs: u64) -> bool {
         return false;
     }
 
+    // Authenticate before OMS+ frames when password protection is enabled.
+    if let Some(pw) = password {
+        if !pw.is_empty() {
+            let invoke = rand::random::<u16>();
+            let neg = hex_decode(&format!(
+                "0300001902f08032010000{invoke:04x}00080000f0000001000101e0"
+            ));
+            if send_recv(&mut stream, &neg).is_none() {
+                return false;
+            }
+            if !set_password(&mut stream, pw) {
+                return false;
+            }
+        }
+    }
+
     // SubscriptionContainer: S7Comm UserData (type 7, subtype 0x72) session setup frame.
     // This initiates the OMS+ Debugger subscription used by TIA Portal for remote CPU control.
     // Packet structure: TPKT + COTP + S7 header + UserData group-7 (OMS) + ASN.1-encoded
@@ -456,7 +489,7 @@ pub fn change_cpu_state(ip: &str, port: u16, timeout_secs: u64) -> bool {
     let Some(sub_resp) = send_recv(
         &mut stream,
         &hex_decode(
-            "030000c002f080720100b131000004ca0000000200000120360000011d 00040000000000a1000000d3821f0000a3816900\
+            "030000c102f080720100b131000004ca0000000200000120360000011d 00040000000000a1000000d3821f0000a3816900\
              1516 53657276657253657373696f6e5f453646353438 3534 34a3822100150b313a3a3a362e303a3a3a12a382 28\
              00150d4f4d532b204465627567676572a3822900 1500a3822a001500a3822b00048480808000a3822c0012 11e1a300\
              a3822d001500a1000000d3817f0000a3816900 1515537562736372697074696f6e436f6e7461696e 6572a2a2000000\
@@ -673,6 +706,28 @@ mod tests {
     }
 
     #[test]
+    fn byte_write_packets_preserve_lsb_first_bit_strings() {
+        let alternating = u8::from_str_radix(&bits_to_hex_byte("01010101"), 16).unwrap();
+        let high_nibble = u8::from_str_radix(&bits_to_hex_byte("11110000"), 16).unwrap();
+        assert_eq!(0xaa, alternating);
+        assert_eq!(0x0f, high_nibble);
+
+        let output = build_byte_write_packet(0x732f, 0x82, 0, alternating).unwrap();
+        assert_eq!(36, output.len());
+        assert_eq!(&[0x03, 0x00, 0x00, 0x24], &output[..4]);
+        assert_eq!(0x000e, u16::from_be_bytes([output[13], output[14]]));
+        assert_eq!(0x0005, u16::from_be_bytes([output[15], output[16]]));
+        assert_eq!(0x82, output[27]);
+        assert_eq!(&[0x00, 0x04, 0x00, 0x08, 0xaa], &output[31..]);
+
+        let merker = build_byte_write_packet(0x0015, 0x83, 7, high_nibble).unwrap();
+        assert_eq!(36, merker.len());
+        assert_eq!(0x83, merker[27]);
+        assert_eq!(&[0x00, 0x00, 0x38], &merker[28..31]);
+        assert_eq!(&[0x00, 0x04, 0x00, 0x08, 0x0f], &merker[31..]);
+    }
+
+    #[test]
     fn write_data_block_too_large_is_rejected() {
         // Guard is now before connect_authenticated: no live PLC needed.
         let big = vec![0u8; 8192];
@@ -693,5 +748,29 @@ mod tests {
     fn hex_decode_even_length_works() {
         assert_eq!(hex_decode("DEAD"), vec![0xDE, 0xAD]);
         assert_eq!(hex_decode("DE AD"), vec![0xDE, 0xAD]);
+    }
+
+    #[test]
+    fn oms_state_packet_has_the_declared_tpkt_length() {
+        let sid = "a4";
+        let cmd_byte = "88";
+        let packet = format!(
+            "0300007802f080720200693100000542000000030000 03{sid}34000003{cmd_byte}010182320100170000013a823b00048140823c00048140823d000400823e00048480c040823f0015008240001506323b31303538824100030003000000000 4e88969001200000000896a001300896b000400000000000072020000"
+        );
+        let decoded = hex_decode(&packet);
+        assert_eq!(decoded.len(), 0x78);
+        assert_eq!(&decoded[..4], &[0x03, 0x00, 0x00, 0x78]);
+    }
+
+    #[test]
+    fn oms_subscription_packet_has_the_declared_tpkt_length() {
+        let packet = "030000c102f080720100b131000004ca0000000200000120360000011d 00040000000000a1000000d3821f0000a3816900\
+             1516 53657276657253657373696f6e5f453646353438 3534 34a3822100150b313a3a3a362e303a3a3a12a382 28\
+             00150d4f4d532b204465627567676572a3822900 1500a3822a001500a3822b00048480808000a3822c0012 11e1a300\
+             a3822d001500a1000000d3817f0000a3816900 1515537562736372697074696f6e436f6e7461696e 6572a2a2000000\
+             0072010000";
+        let decoded = hex_decode(packet);
+        assert_eq!(decoded.len(), 0xC1);
+        assert_eq!(&decoded[..4], &[0x03, 0x00, 0x00, 0xC1]);
     }
 }

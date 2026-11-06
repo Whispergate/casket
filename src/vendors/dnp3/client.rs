@@ -33,8 +33,10 @@ const FC_NOT_SUPPORTED: u8 = 0x0F;
 
 // Source address used in all outgoing frames (master address = 1)
 const MASTER_ADDR: u16 = 0x0001;
-// Destination for broadcasts / initial contact (use a common outstation addr or 0x0003)
-const DEFAULT_OUTSTATION_ADDR: u16 = 0xFFFF; // global all-stations
+// The documented lab profile uses master address 1 and outstation address 10.
+// A DNP3 broadcast must not solicit a response, so it is not suitable for
+// confirming a TCP outstation.
+const DEFAULT_OUTSTATION_ADDR: u16 = 0x000A;
 
 // Transport Layer Header bytes
 const TL_FIRST_FINAL: u8 = 0xC0; // FIN=1, FIR=1, seq=0
@@ -209,7 +211,14 @@ fn frame_ctrl(frame: &[u8]) -> u8 {
 /// Detect a DNP3 outstation at `ip:port` using Request Link Status.
 /// Returns a `Dnp3Device` with empty attributes on success.
 pub fn detect(ip: &str, timeout: Duration) -> Option<Dnp3Device> {
-    let addr = format!("{ip}:{DNP3_PORT}");
+    detect_with_port(ip, DNP3_PORT, timeout)
+}
+
+/// Detect a DNP3 outstation at an explicit TCP port using only link reset and
+/// Request Link Status. `port = 0` uses the standard DNP3 port.
+pub fn detect_with_port(ip: &str, port: u16, timeout: Duration) -> Option<Dnp3Device> {
+    let port = if port == 0 { DNP3_PORT } else { port };
+    let addr = format!("{ip}:{port}");
     let stream = TcpStream::connect_timeout(&addr.parse().ok()?, timeout).ok()?;
     stream.set_read_timeout(Some(timeout)).ok()?;
     stream.set_write_timeout(Some(timeout)).ok()?;
@@ -247,9 +256,20 @@ pub fn detect(ip: &str, timeout: Duration) -> Option<Dnp3Device> {
 
 /// Read device attributes (object group 0) from an outstation.
 pub fn read_device_attributes(ip: &str, timeout: Duration) -> HashMap<String, String> {
+    read_device_attributes_with_port(ip, DNP3_PORT, timeout)
+}
+
+/// Read DNP3 group-0 device attributes on an explicit TCP port. This is a
+/// read-only application-layer request; `port = 0` uses the standard port.
+pub fn read_device_attributes_with_port(
+    ip: &str,
+    port: u16,
+    timeout: Duration,
+) -> HashMap<String, String> {
     let mut attrs = HashMap::new();
 
-    let addr = format!("{ip}:{DNP3_PORT}");
+    let port = if port == 0 { DNP3_PORT } else { port };
+    let addr = format!("{ip}:{port}");
     let Ok(stream) = TcpStream::connect_timeout(&addr.parse().unwrap_or("0.0.0.0:1".parse().unwrap()), timeout) else {
         return attrs;
     };
@@ -411,9 +431,15 @@ fn attr_name(variation: u8) -> &'static str {
 
 /// Read class 0 integrity poll from an outstation (function code Read, object 60 var 1).
 pub fn read_integrity_poll(ip: &str, timeout: Duration) -> Vec<String> {
+    read_integrity_poll_with_port(ip, DNP3_PORT, timeout)
+}
+
+/// Perform a read-only class-0 integrity poll on an explicit TCP port.
+pub fn read_integrity_poll_with_port(ip: &str, port: u16, timeout: Duration) -> Vec<String> {
     let mut results = Vec::new();
 
-    let addr = format!("{ip}:{DNP3_PORT}");
+    let port = if port == 0 { DNP3_PORT } else { port };
+    let addr = format!("{ip}:{port}");
     let Ok(stream) = TcpStream::connect_timeout(&addr.parse().unwrap_or("0.0.0.0:1".parse().unwrap()), timeout) else {
         return results;
     };

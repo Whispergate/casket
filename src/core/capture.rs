@@ -315,7 +315,7 @@ pub fn live_capture(iface: Option<&str>, output: Option<&str>, max_packets: u64)
                 }
                 count += 1;
             }
-            Err(pcap::Error::TimeoutExpired) => continue,
+            Err(pcap::Error::TimeoutExpired) => {}
             Err(e) => {
                 eprintln!("capture error: {e}");
                 break;
@@ -351,9 +351,11 @@ mod tests {
         pkt[13] = 0x00;
         // IPv4 header
         pkt[14] = 0x45; // version=4, IHL=5
+        #[allow(clippy::cast_possible_truncation)]
         let len = total_ip as u16;
         pkt[16] = (len >> 8) as u8;
-        pkt[17] = len as u8;
+        #[allow(clippy::cast_possible_truncation)]
+        { pkt[17] = len as u8; }
         pkt[23] = 6; // TCP
         pkt[26..30].copy_from_slice(&src_ip);
         pkt[30..34].copy_from_slice(&dst_ip);

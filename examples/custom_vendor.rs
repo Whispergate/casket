@@ -1,7 +1,7 @@
 //! Demonstrates how to register a third-party vendor probe alongside the built-ins.
 //!
 //! Run with:
-//!   cargo run --example custom_vendor
+//!   cargo run --example `custom_vendor`
 
 use casket::core::autodetect::{DeviceInfo, VendorProbe, VendorRegistry};
 

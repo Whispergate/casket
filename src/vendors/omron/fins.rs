@@ -24,6 +24,25 @@ pub struct OmronDevice {
     pub version: String,
 }
 
+/// A documented FINS CPU operating mode for command 04 01.
+///
+/// The numeric representation is the mode byte carried by the command and
+/// returned by CPU Status Read (06 01).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CpuMode {
+    Stop = 0x00,
+    Run = 0x01,
+    Monitor = 0x02,
+    Program = 0x04,
+}
+
+impl CpuMode {
+    const fn wire_byte(self) -> u8 {
+        self as u8
+    }
+}
+
 impl OmronDevice {
     /// Map a FINS CPU operating-mode byte to a human-readable state string.
     ///
@@ -214,7 +233,8 @@ pub fn read_dm_words(ip: &str, port: u16, node: u8, start: u16, count: u16) -> R
     }
     let data = &resp[12..];
     let mut values = Vec::with_capacity(count as usize);
-    for chunk in data.chunks_exact(2) {
+    let (word_pairs, _remainder) = data.as_chunks::<2>();
+    for chunk in word_pairs {
         values.push(u16::from_be_bytes([chunk[0], chunk[1]]));
     }
     Ok(values)
@@ -271,20 +291,28 @@ pub fn get_cpu_state(ip: &str, port: u16, node: u8) -> Result<String> {
 }
 
 /// Change CPU operating mode via FINS (command 04 01).
-/// `run=true` → Monitor mode (0x02), `run=false` → Stop mode (0x00).
 /// Pass `port = 0` to use the default FINS/TCP port (9600).
-pub fn set_cpu_mode(ip: &str, port: u16, node: u8, run: bool) -> Result<bool> {
+pub fn set_cpu_state(ip: &str, port: u16, node: u8, mode: CpuMode) -> Result<bool> {
     let mut stream = tcp_connect(ip, port)?;
     let server_node = negotiate_address(&mut stream)?;
     let actual_node = if node == 0 { server_node } else { node };
-    let mode_byte: u8 = if run { 0x02 } else { 0x00 };
-    let cmd = [0x04, 0x01, mode_byte];
+    let cmd = [0x04, 0x01, mode.wire_byte()];
     let resp = send_fins_tcp_node(&mut stream, actual_node, &cmd)?;
     if resp.len() < 12 {
         anyhow::bail!("FINS CPU mode change: response too short");
     }
     let end_code = u16::from_be_bytes([resp[10], resp[11]]);
     Ok(end_code == 0x0000)
+}
+
+/// Legacy convenience wrapper for the older Monitor-or-Stop workflow.
+///
+/// `monitor=true` selects Monitor mode (0x02); `monitor=false` selects Stop
+/// mode (0x00). Prefer [`set_cpu_state`] when the caller needs exact mode
+/// semantics, especially for Run mode (0x01).
+pub fn set_cpu_mode(ip: &str, port: u16, node: u8, monitor: bool) -> Result<bool> {
+    let mode = if monitor { CpuMode::Monitor } else { CpuMode::Stop };
+    set_cpu_state(ip, port, node, mode)
 }
 
 // ─── Internal helper (node override) ────────────────────────────────────────
@@ -317,4 +345,25 @@ fn send_fins_tcp_node(stream: &mut TcpStream, server_node: u8, cmd: &[u8]) -> Re
     let mut body = vec![0u8; body_len];
     stream.read_exact(&mut body).context("FINS/TCP: short response body")?;
     Ok(body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CpuMode, OmronDevice};
+
+    #[test]
+    fn cpu_mode_wire_values_match_documented_fins_states() {
+        assert_eq!(CpuMode::Stop.wire_byte(), 0x00);
+        assert_eq!(CpuMode::Run.wire_byte(), 0x01);
+        assert_eq!(CpuMode::Monitor.wire_byte(), 0x02);
+        assert_eq!(CpuMode::Program.wire_byte(), 0x04);
+    }
+
+    #[test]
+    fn cpu_state_strings_distinguish_run_from_monitor() {
+        assert_eq!(OmronDevice::cpu_state_str(0x00), "Stop");
+        assert_eq!(OmronDevice::cpu_state_str(0x01), "Run");
+        assert_eq!(OmronDevice::cpu_state_str(0x02), "Monitor");
+        assert_eq!(OmronDevice::cpu_state_str(0x04), "Program");
+    }
 }

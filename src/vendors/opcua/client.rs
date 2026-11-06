@@ -186,13 +186,19 @@ fn parse_opn_response(data: &[u8]) -> Option<(u32, u32)> {
     if data.len() < 12 || !data.starts_with(b"OPNF") {
         return None;
     }
-    let channel_id = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
-    // Security token starts after channel_id(4) + token_type(varies)...
-    // token_id is at offset 8 + 4 = 12 in the OPN body, but the actual layout depends on
-    // policy bytes. For policy=None, sender/receiver certs are null (4 bytes each = 0xFFFFFFFF),
-    // seq header is 8 bytes, then the response body starts with the TypeId.
-    // For a simple scanner, just returning the channel_id is sufficient.
-    Some((channel_id, 1)) // token_id = 1 (we don't parse it further)
+    let mut parser = Parser::new(&data[8..]);
+    let secure_channel_id = parser.read_u32()?;
+    let _security_policy_uri = parser.read_string()?;
+    let _sender_certificate = parser.read_bytestring()?;
+    let _receiver_thumbprint = parser.read_bytestring()?;
+    let _sequence_number = parser.read_u32()?;
+    let _request_id = parser.read_u32()?;
+    parser.skip_node_id()?; // OpenSecureChannelResponse encoding id
+    parser.skip_response_header()?;
+    let _server_protocol_version = parser.read_u32()?;
+    let _token_channel_id = parser.read_u32()?;
+    let token_id = parser.read_u32()?;
+    Some((secure_channel_id, token_id))
 }
 
 // ─── GetEndpoints MSG ─────────────────────────────────────────────────────────
@@ -333,19 +339,28 @@ impl<'a> Parser<'a> {
         Some(())
     }
 
-    /// Skip a `RequestHeader` (consumed by the response parser to get past it).
+    fn skip_diagnostic_info(&mut self) -> Option<()> {
+        let mask = self.read_u8()?;
+        if (mask & 0x01) != 0 { self.read_i32()?; }
+        if (mask & 0x02) != 0 { self.read_i32()?; }
+        if (mask & 0x04) != 0 { self.read_i32()?; }
+        if (mask & 0x08) != 0 { self.read_i32()?; }
+        if (mask & 0x10) != 0 { self.read_string()?; }
+        if (mask & 0x20) != 0 { self.read_u32()?; }
+        if (mask & 0x40) != 0 { self.skip_diagnostic_info()?; }
+        Some(())
+    }
+
+    /// Skip an OPC UA `ResponseHeader` using the Binary Schema field widths.
     fn skip_response_header(&mut self) -> Option<()> {
         // timestamp(8) + request_handle(4) + service_result(4) + service_diagnostics + string + extension
-        self.pos += 8; // timestamp
-        self.pos += 4; // request handle
-        self.pos += 4; // service result (status code)
-        // service diagnostics: extended diagnostic (variable) — skip by checking encoded form
-        // simplified: just skip the mask byte if it's the simplified form
-        let diag_bits = self.read_u32()?;
-        if diag_bits != 0 {
-            // has diagnostic info — best-effort skip remaining header and bail
+        if self.remaining() < 16 {
             return None;
         }
+        self.pos += 16;
+        // service diagnostics: extended diagnostic (variable) — skip by checking encoded form
+        // simplified: just skip the mask byte if it's the simplified form
+        self.skip_diagnostic_info()?;
         // string array (string tables)
         let str_count = self.read_i32()?;
         for _ in 0..str_count.max(0) {
@@ -357,7 +372,11 @@ impl<'a> Parser<'a> {
         if encoding != 0 {
             let body_len = self.read_i32()?;
             if body_len > 0 {
-                self.pos += usize::try_from(body_len).unwrap_or(0);
+                let body_len = usize::try_from(body_len).unwrap_or(0);
+                if self.remaining() < body_len {
+                    return None;
+                }
+                self.pos += body_len;
             }
         }
         Some(())
@@ -390,7 +409,6 @@ fn parse_get_endpoints(data: &[u8]) -> Vec<EndpointInfo> {
     if p.skip_node_id().is_none() {
         return endpoints;
     }
-
     // Response header
     if p.skip_response_header().is_none() {
         return endpoints;
@@ -532,46 +550,91 @@ pub fn detect(ip: &str, port: u16, timeout: Duration) -> Option<OpcuaServer> {
     })
 }
 
+fn message_description(data: &[u8]) -> String {
+    if data.len() < 8 {
+        return "truncated response".to_string();
+    }
+    let kind = String::from_utf8_lossy(&data[..4]);
+    if &data[..3] == b"ERR" && data.len() >= 12 {
+        let status = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+        let mut parser = Parser::new(&data[12..]);
+        let reason = parser.read_string().unwrap_or_default();
+        if !reason.is_empty() {
+            return format!("{kind} status=0x{status:08x}: {reason}");
+        }
+        return format!("{kind} status=0x{status:08x}");
+    }
+    format!("{kind} ({} bytes)", data.len())
+}
+
 /// Get endpoint descriptors from an OPC-UA server via HEL → OPN → `GetEndpoints`.
-pub fn get_endpoints(ip: &str, port: u16, timeout: Duration) -> Vec<EndpointInfo> {
+///
+/// Unlike [`get_endpoints`], this preserves transport and protocol failures so callers
+/// can distinguish an empty endpoint list from a rejected secure-channel request.
+pub fn get_endpoints_checked(
+    ip: &str,
+    port: u16,
+    timeout: Duration,
+) -> Result<Vec<EndpointInfo>, String> {
     let effective_port = if port == 0 { OPCUA_PORT } else { port };
     let addr = format!("{ip}:{effective_port}");
     let endpoint_url = format!("opc.tcp://{ip}:{effective_port}");
 
-    let Ok(stream) = TcpStream::connect_timeout(&addr.parse().unwrap_or("0.0.0.0:1".parse().unwrap()), timeout) else {
-        return Vec::new();
-    };
-    let _ = stream.set_read_timeout(Some(timeout));
-    let _ = stream.set_write_timeout(Some(timeout));
+    let socket_addr = addr
+        .parse()
+        .map_err(|e| format!("invalid server address {addr}: {e}"))?;
+    let stream = TcpStream::connect_timeout(&socket_addr, timeout)
+        .map_err(|e| format!("TCP connection to {addr} failed: {e}"))?;
+    stream
+        .set_read_timeout(Some(timeout))
+        .map_err(|e| format!("could not set read timeout: {e}"))?;
+    stream
+        .set_write_timeout(Some(timeout))
+        .map_err(|e| format!("could not set write timeout: {e}"))?;
     let mut stream = stream;
 
     // HEL
     let hel = build_hel(&endpoint_url);
-    if stream.write_all(&hel).is_err() {
-        return Vec::new();
+    stream
+        .write_all(&hel)
+        .map_err(|e| format!("HEL write failed: {e}"))?;
+    let ack = recv_message(&mut stream).ok_or_else(|| "no HEL response".to_string())?;
+    if !is_ack(&ack) {
+        return Err(format!("HEL was rejected: {}", message_description(&ack)));
     }
-    let ack = match recv_message(&mut stream) {
-        Some(r) if is_ack(&r) => r,
-        _ => return Vec::new(),
-    };
-    drop(ack);
 
     // OPN
     let opn = build_opn(0, 1, 1);
-    if stream.write_all(&opn).is_err() {
-        return Vec::new();
-    }
-    let Some(opn_resp) = recv_message(&mut stream) else { return Vec::new() };
-    let Some((channel_id, token_id)) = parse_opn_response(&opn_resp) else { return Vec::new() };
+    stream
+        .write_all(&opn)
+        .map_err(|e| format!("OPN write failed: {e}"))?;
+    let opn_resp = recv_message(&mut stream).ok_or_else(|| "no OPN response".to_string())?;
+    let (channel_id, token_id) = parse_opn_response(&opn_resp).ok_or_else(|| {
+        format!(
+            "could not decode OpenSecureChannel response: {}",
+            message_description(&opn_resp)
+        )
+    })?;
 
     // GetEndpoints
     let ge = build_get_endpoints(channel_id, token_id, 2, 2, &endpoint_url);
-    if stream.write_all(&ge).is_err() {
-        return Vec::new();
+    stream
+        .write_all(&ge)
+        .map_err(|e| format!("GetEndpoints write failed: {e}"))?;
+    let ge_resp = recv_message(&mut stream).ok_or_else(|| "no GetEndpoints response".to_string())?;
+    if !ge_resp.starts_with(b"MSG") {
+        return Err(format!(
+            "GetEndpoints was rejected: {}",
+            message_description(&ge_resp)
+        ));
     }
-    let Some(ge_resp) = recv_message(&mut stream) else { return Vec::new() };
 
-    parse_get_endpoints(&ge_resp)
+    Ok(parse_get_endpoints(&ge_resp))
+}
+
+/// Compatibility wrapper for callers that only need a best-effort endpoint list.
+pub fn get_endpoints(ip: &str, port: u16, timeout: Duration) -> Vec<EndpointInfo> {
+    get_endpoints_checked(ip, port, timeout).unwrap_or_default()
 }
 
 /// Build a human-readable summary map for an [`OpcuaServer`].
@@ -656,5 +719,16 @@ mod tests {
         data.extend_from_slice(b"abc");
         let mut p = Parser::new(&data);
         assert_eq!(p.read_string().unwrap(), "abc");
+    }
+
+    #[test]
+    fn parser_skips_a_standard_empty_response_header() {
+        let mut data = vec![0; 16]; // timestamp, request handle, status code
+        data.push(0); // DiagnosticInfo mask
+        data.extend_from_slice(&(-1i32).to_le_bytes()); // null StringTable
+        data.extend_from_slice(&[0, 0, 0]); // null ExtensionObject
+        let mut parser = Parser::new(&data);
+        assert!(parser.skip_response_header().is_some());
+        assert_eq!(parser.remaining(), 0);
     }
 }
