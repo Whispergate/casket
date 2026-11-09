@@ -22,10 +22,16 @@ jobs:
           components: clippy
 
       - name: Build
-        run: cargo build --verbose
+        run: cargo build --verbose --all-targets
 
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Test
         run: cargo test --verbose
+
+      - name: Examples
+        run: |
+          cargo run --example capabilities
+          cargo run --example loopback_modbus
+          cargo run --example detect -- 192.0.2.1 1

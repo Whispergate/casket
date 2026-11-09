@@ -1,6 +1,7 @@
 pub mod autodetect;
 pub mod capture;
 pub mod bytes;
+pub mod client;
 pub mod httpcreds;
 pub mod modbus;
 pub mod modbus_fdi;

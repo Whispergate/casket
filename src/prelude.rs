@@ -4,6 +4,7 @@
 //! and protocol constants for Beckhoff, Omron, and Siemens. Other vendor types
 //! are available directly under `casket::vendors`.
 
+pub use crate::error::{Error, Result};
 pub use crate::core::autodetect::{
     detect_device, probe_all, set_stealth, stealth_enabled, sweep, DeviceInfo, IntoDeviceInfo,
     ProbeInfo, SweepOutcome, VendorProbe, VendorRegistry,

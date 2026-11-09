@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "casket"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 rust-version = "1.88"
 authors = ["SawyersPresent (https://github.com/SawyersPresent)"]
@@ -14,6 +14,14 @@ keywords = ["ics", "scada", "modbus", "enip", "plc"]
 categories = ["network-programming", "embedded"]
 license-file = "LICENSE"
 readme = "README.md"
+exclude = [
+    "patches/",
+    "QUEUE.md",
+    "RULES.md",
+    "ITERATION-LOG.md",
+    "scadaver-impact.md",
+    "docs/api-surface.txt",
+]
 
 [lib]
 name = "casket"

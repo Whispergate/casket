@@ -19,12 +19,37 @@ pub fn stealth_enabled() -> bool {
     STEALTH_MODE.load(Ordering::Relaxed)
 }
 
-/// The result of vendor autodetection: the identified vendor slug, target IP, and a flattened
-/// map of vendor-specific fields (ports, identity strings, capability flags).
+/// One successful probe: which vendor answered, at which address, and what it said.
+///
+/// Produced by [`probe_builtin`], [`sweep`], or [`VendorRegistry::probe_all`]. The vendor-specific
+/// part is flattened into [`fields`](DeviceInfo::fields) instead of a typed struct, so one sweep can
+/// return records from every protocol without the caller matching on each one.
+///
+/// Treat identity values as a lead, not as proof: they come from whatever the probe could read, and
+/// a device can lie or be misidentified. Confirm before acting on one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceInfo {
+    /// The probe slug that matched, e.g. `"beckhoff"` or `"siemens"`.
+    ///
+    /// Chosen by the probe, not read from the device. Some slugs name a protocol family rather than a
+    /// make (`"modicon"`, `"enip"`), so a hit does not pin down the hardware.
     pub vendor: String,
+
+    /// The address that was probed, copied from the caller's argument.
+    ///
+    /// Never read from the device. In a sweep this is the host that answered; in a direct probe it is
+    /// the string that was passed in, so a hostname stays a hostname.
     pub ip: String,
+
+    /// Vendor-specific facts, flattened: identity strings, ports, and capability flags.
+    ///
+    /// Keys vary by vendor, and the same key can carry different provenance within one vendor.
+    /// `name`, `firmware`, `product_name`, `vendor_id` and `serial` are device-declared. Numeric
+    /// `*port` keys are a mix of compiled-in constants from the probe and ports the scan actually
+    /// found, so a port here means "the protocol this probe speaks", not proof that the service is
+    /// reachable. `cap_*` entries are booleans, always present for that vendor, and may be false,
+    /// which is how a negative answer is recorded. Other keys are omitted when the device did not
+    /// report them, so an absent key means "not learned", never "false".
     #[serde(flatten)]
     pub fields: HashMap<String, serde_json::Value>,
 }
@@ -51,10 +76,12 @@ fn vendor_priority(vendor: &str) -> u8 {
     }
 }
 
-/// Display metadata for one protocol probe in an auto-sweep.
+/// Display metadata for one probe in a sweep: what the sweep calls it and where it looks.
 #[derive(Clone, Copy)]
 pub struct ProbeInfo {
+    /// Human-readable protocol name for sweep output, e.g. `"Beckhoff ADS"`.
     pub label: &'static str,
+    /// Transport and port description for sweep output, e.g. `"UDP 48899 / TCP 48898"`.
     pub transport: &'static str,
 }
 
@@ -74,7 +101,9 @@ pub struct ProtocolInfo {
 
 /// One protocol's result from `sweep`: what was probed and what (if anything) responded.
 pub struct SweepOutcome {
+    /// The probe that ran, even when it found nothing.
     pub probe: ProbeInfo,
+    /// The record the probe returned, or `None` when nothing answered.
     pub device: Option<DeviceInfo>,
 }
 

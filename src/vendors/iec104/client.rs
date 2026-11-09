@@ -2,7 +2,10 @@
 ///
 /// Implements the Application Protocol Control Interface (APCI) framing used
 /// by most ICS SCADA master stations. Port 2404.
+use crate::core::autodetect::DeviceInfo;
+use crate::core::client::DeviceClient;
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
@@ -165,6 +168,8 @@ pub struct Iec104Session {
     stream: TcpStream,
     tx_seq: u16, // send sequence number (increments by 1 per I-frame sent)
     rx_seq: u16, // receive sequence number (increments by 1 per I-frame received)
+    /// What the connect path learned about the peer; see [`DeviceClient::device_info`].
+    info: DeviceInfo,
 }
 
 impl Iec104Session {
@@ -224,6 +229,33 @@ impl Iec104Session {
     }
 }
 
+impl DeviceClient for Iec104Session {
+    fn device_info(&self) -> &DeviceInfo {
+        &self.info
+    }
+
+    /// Nothing to release here: the `TcpStream` closes when the session is dropped, and there is no
+    /// flag to flip that another method would read. Kept as a no-op so generic code can still say
+    /// "I am done", and calling it twice is not an error.
+    fn close(&mut self) -> crate::error::Result<()> {
+        Ok(())
+    }
+}
+
+/// The record a session carries: the peer address and the port it was actually dialed on.
+///
+/// `vendor` matches the slug `probe_iec104` writes, so a probed record and a connected one read the
+/// same way. Capability flags are added by the caller once the handshake proves them.
+fn session_info(ip: &str, port: u16) -> DeviceInfo {
+    let mut fields: HashMap<String, serde_json::Value> = HashMap::new();
+    fields.insert("port".into(), serde_json::Value::Number(port.into()));
+    DeviceInfo {
+        vendor: "iec104".into(),
+        ip: ip.into(),
+        fields,
+    }
+}
+
 /// Connect to an IEC 104 outstation, send STARTDT, and confirm the data transfer phase.
 /// Returns a session that can issue commands. Pass `port = 0` to use the default (2404).
 pub fn connect(ip: &str, port: u16) -> Result<Iec104Session> {
@@ -238,6 +270,7 @@ pub fn connect(ip: &str, port: u16) -> Result<Iec104Session> {
         stream,
         tx_seq: 0,
         rx_seq: 0,
+        info: session_info(ip, effective_port),
     };
 
     // Send STARTDT act, expect STARTDT con
@@ -247,6 +280,8 @@ pub fn connect(ip: &str, port: u16) -> Result<Iec104Session> {
     if resp.len() < 4 || resp[0..4] != STARTDT_CON {
         anyhow::bail!("IEC104: STARTDT not confirmed (got {:?})", &resp[..resp.len().min(4)]);
     }
+    // STARTDT con is the data transfer phase; that is the capability this session can claim.
+    session.info.fields.insert("cap_iec104_tcp".into(), true.into());
 
     Ok(session)
 }
@@ -263,6 +298,7 @@ pub fn probe(ip: &str, port: u16) -> bool {
         stream,
         tx_seq: 0,
         rx_seq: 0,
+        info: session_info(ip, effective_port),
     };
     let testfr = Iec104Session::apdu_uframe(TESTFR_ACT);
     if session.send(&testfr).is_err() {
