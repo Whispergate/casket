@@ -75,28 +75,24 @@ pub fn capturing() -> bool {
 /// Write text with no trailing newline.
 pub fn emit(text: &str) {
     let mut slot = buffer();
-    match slot.as_mut() {
-        Some(buf) => buf.push_str(text),
-        None => {
-            drop(slot);
-            print!("{text}");
-        }
-    }
+    let Some(buf) = slot.as_mut() else {
+        drop(slot);
+        print!("{text}");
+        return;
+    };
+    buf.push_str(text);
 }
 
 /// Write one line.
 pub fn emit_line(text: &str) {
     let mut slot = buffer();
-    match slot.as_mut() {
-        Some(buf) => {
-            buf.push_str(text);
-            buf.push('\n');
-        }
-        None => {
-            drop(slot);
-            println!("{text}");
-        }
-    }
+    let Some(buf) = slot.as_mut() else {
+        drop(slot);
+        println!("{text}");
+        return;
+    };
+    buf.push_str(text);
+    buf.push('\n');
 }
 
 /// `println!`, but through the sink. Replace `println!` with this and nothing else.

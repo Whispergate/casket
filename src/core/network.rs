@@ -1,4 +1,5 @@
-use anyhow::Result;
+// Errors use crate::error; see docs/errors.md.
+use crate::error::Result;
 use network_interface::{Addr, NetworkInterfaceConfig};
 use socket2::{Domain, Protocol, Socket, Type};
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
@@ -70,12 +71,17 @@ pub fn calculate_broadcast(ip: &str, netmask: &str) -> String {
 
 /// Create a broadcast UDP socket bound to the unspecified address.
 pub fn create_udp_broadcast_socket(bind_ip: &str, timeout_secs: u64) -> Result<UdpSocket> {
+    let ip: Ipv4Addr = bind_ip.parse().map_err(|e| crate::error::Error::Protocol {
+        protocol: "network",
+        detail: format!("bad bind address {bind_ip}: {e}"),
+    })?;
+
     let sock = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
     sock.set_reuse_address(true)?;
     sock.set_broadcast(true)?;
     sock.set_read_timeout(Some(Duration::from_secs(timeout_secs.max(1))))?;
 
-    let bind_addr: SocketAddr = SocketAddr::new(bind_ip.parse::<Ipv4Addr>()?.into(), 0);
+    let bind_addr: SocketAddr = SocketAddr::new(ip.into(), 0);
     sock.bind(&bind_addr.into())?;
 
     Ok(UdpSocket::from(sock))

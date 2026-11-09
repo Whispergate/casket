@@ -6,39 +6,53 @@ so the implementations can be used independently of the tool.
 
 ## What it provides
 
-`casket` contains pure-Rust implementations of 16 industrial control system protocols,
+`casket` contains pure-Rust implementations of 15 industrial control system protocol families
+(16 support rows, because EtherNet/IP appears twice: identity scanning and the CIP tag driver),
 device autodetection across major PLC and HMI vendors, and an extensible `VendorRegistry`
 so third parties can register their own vendor probes alongside the built-ins.
 
-**Supported protocols and vendors**
+**Support matrix.** `cargo run --example capabilities` prints this table from the same data the
+library uses to answer questions about itself, so it cannot drift from the code.
 
-| Protocol | Vendor |
-|---|---|
-| EtherNet/IP (ENIP/CIP) | Rockwell Automation / Allen-Bradley |
-| Modbus TCP | Generic |
-| S7Comm | Siemens |
-| FINS TCP/UDP | Omron |
-| SLMP | Mitsubishi |
-| ADS/AMS | Beckhoff |
-| IEC 60870-5-104 | Generic RTU/MTU |
-| SNMP | Generic |
-| MQTT | Broker enumeration |
-| DNP3 | Generic |
-| BACnet | Generic |
-| OPC-UA | Generic |
-| eWON | HMS Networks |
-| WebVisit | Phoenix Contact |
-| Modicon FC90 | Schneider Electric |
-| CIP over EtherNet/IP | Rockwell (tag driver) |
+| Protocol | Read | Write | Notes |
+|---|---|---|---|
+| `enip` | yes | no | EtherNet/IP (ENIP/CIP) identity and stack scan; entry src/vendors/enip/scan.rs. |
+| `modbus` | yes | yes | Modbus TCP codec in core, not the vendor tree; entry src/core/modbus.rs. |
+| `siemens` | yes | yes | S7Comm; entry src/vendors/siemens/s7comm.rs (read_data_block, write_data_block). |
+| `omron` | yes | yes | FINS TCP/UDP; entry src/vendors/omron/fins.rs (read_dm_words, write_dm_words). |
+| `mitsubishi` | yes | yes | SLMP; entry src/vendors/mitsubishi/slmp.rs (read_word_devices, write_word_devices). |
+| `beckhoff` | yes | yes | ADS/AMS; entry src/vendors/beckhoff/ads.rs; write_symbol_value in src/vendors/beckhoff/scan.rs. |
+| `iec104` | yes | no | IEC 60870-5-104; entry src/vendors/iec104/client.rs. Control is single_command, not write_*. |
+| `snmp` | yes | no | SNMP; entry src/vendors/snmp/client.rs. set() changes state but is not write_*. |
+| `mqtt` | yes | no | MQTT; entry src/vendors/mqtt/client.rs. publish() writes a topic but is not write_*. |
+| `dnp3` | yes | no | DNP3; entry src/vendors/dnp3/client.rs (read_integrity_poll, read_device_attributes). |
+| `bacnet` | yes | no | BACnet/IP; entry src/vendors/bacnet/client.rs (read_property, device_summary). |
+| `opcua` | yes | no | OPC-UA; entry src/vendors/opcua/client.rs (get_endpoints, server_summary). |
+| `ewon` | yes | no | eWON Flexy; entry src/vendors/ewon/scan.rs (read_tag_values). |
+| `phoenix` | yes | yes | Phoenix Contact WebVisit; entry src/vendors/phoenix/webvisit.rs (read_tag_values, write_tag_value). |
+| `schneider` | yes | no | Modicon FC90; entry src/vendors/schneider/modicon_fc90.rs. force_output_bit is control, not write_*. |
+| `rockwell` | yes | yes | CIP tag driver over EtherNet/IP; entry src/vendors/rockwell/driver.rs (read_tag, write_tag). |
 
-## Usage
+`Write` means a `write_*` function exists, not that a device accepts the write. Four protocols change
+state through a verb that is not named `write_*`: SNMP `set`, MQTT `publish`, IEC-104
+`single_command`, Schneider `force_output_bit`.
 
-Add to `Cargo.toml`:
+## Install
+
+```bash
+cargo add casket
+```
+
+Rust 1.88 or newer. To follow unreleased work, pin the repository instead:
 
 ```toml
 [dependencies]
 casket = { git = "https://github.com/Whispergate/casket" }
 ```
+
+API reference: <https://docs.rs/casket>
+
+## Usage
 
 ### Autodetect a device
 
@@ -81,11 +95,29 @@ fn main() {
 }
 ```
 
-Run the bundled example:
+## Examples
+
+Each example is a standalone binary with no extra dependencies, and each one runs with
+`cargo run --example <name>`:
+
+| Example | What it shows |
+|---|---|
+| `detect` | Autodetect one host and print the vendor and the fields that answered |
+| `read_modbus` | Read holding registers from a device on the network |
+| `write_modbus` | Write one register, read it back, and refuse to claim success unless the value stuck |
+| `loopback_modbus` | Read a device the process starts itself, so the whole path runs without hardware |
+| `capabilities` | Print the support matrix above |
+| `custom_vendor` | Register a vendor probe beside the built-ins |
 
 ```bash
-cargo run --example custom_vendor -- 192.168.1.10
+cargo run --example loopback_modbus
+cargo run --example detect -- 192.168.1.10 5
+cargo run --example read_modbus -- 192.168.1.10 502 0 8
+cargo run --example write_modbus -- 192.168.1.10 502 10 1234 --i-am-sure
 ```
+
+The `--i-am-sure` flag is deliberate friction. A register write moves a real setpoint, and the example
+refuses to run without it.
 
 ### Optional features
 
@@ -99,32 +131,14 @@ cargo run --example custom_vendor -- 192.168.1.10
 
 ```
 casket/
-  src/
-    core/
-      autodetect.rs    VendorRegistry, VendorProbe, DeviceInfo
-      network.rs       Interface enumeration, broadcast UDP sockets
-      capture.rs       Packet capture helpers (feature = "capture")
-      modbus.rs        Modbus codec shared by multiple vendors
-    vendors/
-      bacnet/          BACnet/IP
-      beckhoff/        ADS/AMS
-      dnp3/            DNP3 serial and TCP
-      enip/            EtherNet/IP, CIP
-      ewon/            HMS eWON Cosy/Flexy
-      iec104/          IEC 60870-5-104
-      mitsubishi/      SLMP
-      mqtt/            MQTT broker scan and session
-      omron/           FINS TCP/UDP
-      opcua/           OPC-UA
-      phoenix/         Phoenix Contact WebVisit
-      rockwell/        Allen-Bradley tag read/write
-      schneider/       Modicon FC90, session hijack
-      siemens/         S7Comm
-      snmp/            SNMP v1/v2c/v3
-    prelude.rs         Re-exports for the most common types
-    references.rs      CVE and protocol reference data
-  casket-macros/       Proc-macro workspace member
+  src/core/           autodetect, network, capture, modbus codec, device client trait, error type
+  src/vendors/        one directory per protocol family
+  src/capabilities.rs the support matrix, as data
+  casket-macros/      #[derive(IntoDeviceInfo)]
 ```
+
+[docs/architecture.md](docs/architecture.md) has the layer map and why the boundaries fall where they
+do; [docs/errors.md](docs/errors.md) covers the error type.
 
 ## Writing a vendor plugin
 
@@ -137,7 +151,7 @@ For vendors where you build `DeviceInfo` from a struct, the `macros` feature pro
 
 ```toml
 [dependencies]
-casket = { git = "https://github.com/Whispergate/casket", features = ["macros"] }
+casket = { version = "0.1.2", features = ["macros"] }
 ```
 
 ```rust
